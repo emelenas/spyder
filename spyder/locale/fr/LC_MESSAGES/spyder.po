@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-18 17:52\n"
+"PO-Revision-Date: 2021-11-18 19:17\n"
 "Last-Translator: \n"
 "Language-Team: French\n"
 "MIME-Version: 1.0\n"
@@ -19,31 +19,31 @@ msgstr ""
 
 #: spyder/api/plugin_registration/_confpage.py:26
 msgid "Here you can turn on/off any internal or external Spyder plugin to disable functionality that is not desired or to have a lighter experience. Unchecked plugins in this page will be unloaded immediately and will not be loaded the next time Spyder starts."
-msgstr ""
+msgstr "Ici, vous pouvez activer/désactiver n'importe quel plugin Spyder interne ou externe pour désactiver les fonctionnalités qui ne sont pas désirées ou pour avoir une expérience plus légère. Les plugins non cochés dans cette page seront déchargés immédiatement et ne seront pas chargés la prochaine fois que Spyder démarrera."
 
 #: spyder/api/plugin_registration/_confpage.py:34
 msgid "Internal plugins"
-msgstr ""
+msgstr "Plugins internes"
 
 #: spyder/api/plugin_registration/_confpage.py:62
 msgid "External plugins"
-msgstr ""
+msgstr "Plugins externes"
 
 #: spyder/api/plugin_registration/registry.py:656
 msgid "Plugins"
-msgstr ""
+msgstr "Plugins"
 
 #: spyder/api/widgets/main_widget.py:241
 msgid "Main widget toolbar"
-msgstr ""
+msgstr "Barre d'outils du widget principal"
 
 #: spyder/api/widgets/main_widget.py:251
 msgid "Main widget corner toolbar"
-msgstr ""
+msgstr "Barre d'outils d'angle du widget principal"
 
 #: spyder/api/widgets/main_widget.py:263
 msgid "Options menu"
-msgstr ""
+msgstr "Menu des options"
 
 #: spyder/api/widgets/main_widget.py:310 spyder/plugins/base.py:174 spyder/plugins/editor/widgets/editor.py:677 spyder/plugins/variableexplorer/widgets/objectexplorer/objectexplorer.py:204
 msgid "Options"
@@ -75,19 +75,19 @@ msgstr "Fermer le volet"
 
 #: spyder/api/widgets/toolbars.py:123
 msgid "More"
-msgstr ""
+msgstr "Détails"
 
 #: spyder/app/mainwindow.py:198
 msgid "Compatibility Check"
-msgstr ""
+msgstr "Vérification de la compatibilité"
 
 #: spyder/app/mainwindow.py:209
 msgid "Loading {}..."
-msgstr ""
+msgstr "Chargement de {}..."
 
 #: spyder/app/mainwindow.py:701
 msgid "An error occurred while creating a socket needed by Spyder. Please, try to run as an Administrator from cmd.exe the following command and then restart your computer: <br><br><span style='color: {color}'><b>netsh winsock reset </b></span><br>"
-msgstr ""
+msgstr "Une erreur est survenue lors de la création d'une socket nécessaire à Spyder. Veuillez essayer d'exécuter en tant qu'administrateur depuis cmd.exe la commande suivante, puis redémarrez votre ordinateur : <br><br><span style='color: {color}'><b>netsh winsock reset</b></span><br>"
 
 #: spyder/app/mainwindow.py:823 spyder/plugins/tours/widgets.py:1087
 msgid "Welcome to Spyder!"
@@ -110,7 +110,7 @@ msgstr "Console interne de Spyder\n\n"
 
 #: spyder/app/mainwindow.py:909
 msgid "Loading old third-party plugins..."
-msgstr ""
+msgstr "Chargement des anciens plugins tiers..."
 
 #: spyder/app/mainwindow.py:957 spyder/plugins/editor/widgets/editor.py:281
 msgid "File switcher..."
@@ -356,7 +356,7 @@ msgstr "Gestion des communications entre le noyau et l'interface"
 
 #: spyder/dependencies.py:113
 msgid "Create projects from cookiecutter templates"
-msgstr ""
+msgstr "Créer des projets à partir de modèles cookiecutter"
 
 #: spyder/dependencies.py:117
 msgid "Compute text file diff changes during edition"
@@ -376,7 +376,7 @@ msgstr "Backend principal pour le serveur de langue Python"
 
 #: spyder/dependencies.py:133
 msgid "Optimize algorithms for folding"
-msgstr ""
+msgstr "Optimiser les algorithmes de pliage"
 
 #: spyder/dependencies.py:137
 msgid "Verify if snippets files are valid"
@@ -432,7 +432,7 @@ msgstr "Formater automatiquement les fichiers Python dans l'éditeur avec le pac
 
 #: spyder/dependencies.py:193
 msgid "Spyder plugin for the Python LSP Server"
-msgstr ""
+msgstr "Plugin Spyder pour le serveur LSP Python"
 
 #: spyder/dependencies.py:197
 msgid "Parse desktop files on Linux"
@@ -448,7 +448,7 @@ msgstr "Style sombre pour toute l'interface"
 
 #: spyder/dependencies.py:210
 msgid "Customize Qt stylesheets"
-msgstr ""
+msgstr "Customiser les feuilles de style Qt"
 
 #: spyder/dependencies.py:214
 msgid "Icon theme based on FontAwesome and Material Design icons"
@@ -572,7 +572,7 @@ msgstr "Apparence"
 
 #: spyder/plugins/appearance/plugin.py:47
 msgid "Manage application appearance and themes."
-msgstr ""
+msgstr "Gérer l'apparence de l'application et les thèmes."
 
 #: spyder/plugins/appearance/widgets.py:91
 msgid "Text"
@@ -761,15 +761,15 @@ msgstr "Redémarrer"
 
 #: spyder/plugins/application/container.py:187
 msgid "&Restart in debug mode"
-msgstr ""
+msgstr "&Redémarrer en mode debug"
 
 #: spyder/plugins/application/container.py:188
 msgid "Restart in debug mode"
-msgstr ""
+msgstr "Redémarrer en mode debug"
 
 #: spyder/plugins/application/container.py:198
 msgid "Debug logs"
-msgstr ""
+msgstr "Journaux de débugage"
 
 #: spyder/plugins/application/container.py:253
 msgid "New Spyder version"
