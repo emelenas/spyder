@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-18 19:17\n"
+"PO-Revision-Date: 2021-11-18 19:22\n"
 "Last-Translator: \n"
 "Language-Team: French\n"
 "MIME-Version: 1.0\n"
@@ -769,7 +769,7 @@ msgstr "Redémarrer en mode debug"
 
 #: spyder/plugins/application/container.py:198
 msgid "Debug logs"
-msgstr "Journaux de débugage"
+msgstr "Journaux de débogage"
 
 #: spyder/plugins/application/container.py:253
 msgid "New Spyder version"
@@ -793,7 +793,7 @@ msgstr "<b>Remarque importante :</b> Puisque que vous avez installé Spyder avec
 
 #: spyder/plugins/application/container.py:290
 msgid "Click <a href=\"{}\">this link</a> to download it.<br><br>"
-msgstr ""
+msgstr "Cliquez sur <a href=\"{}\">ce lien</a> pour le télécharger.<br><br>"
 
 #: spyder/plugins/application/container.py:300
 msgid "Spyder is up to date."
@@ -805,19 +805,19 @@ msgstr "<b>Vous avez des dépendances manquantes!</b><br><br><tt>%s</tt><br><b>V
 
 #: spyder/plugins/application/container.py:414
 msgid "Question"
-msgstr ""
+msgstr "Question"
 
 #: spyder/plugins/application/container.py:417
 msgid "Which debug mode do you want Spyder to restart in?"
-msgstr ""
+msgstr "Dans quel mode de débogage voulez-vous que Spyder redémarre ?"
 
 #: spyder/plugins/application/container.py:420
 msgid "Verbose"
-msgstr ""
+msgstr "Détaillé"
 
 #: spyder/plugins/application/container.py:421
 msgid "Minimal"
-msgstr ""
+msgstr "Minimal"
 
 #: spyder/plugins/application/container.py:532 spyder/plugins/completion/providers/kite/widgets/messagebox.py:25 spyder/plugins/ipythonconsole/widgets/shell.py:486
 msgid "Don't show again."
@@ -833,11 +833,11 @@ msgstr "Rejeter"
 
 #: spyder/plugins/application/plugin.py:55
 msgid "Application"
-msgstr ""
+msgstr "Application"
 
 #: spyder/plugins/application/plugin.py:61
 msgid "Provide main application base actions."
-msgstr ""
+msgstr "Fournir les actions de base de l'application principale."
 
 #: spyder/plugins/base.py:321 spyder/plugins/editor/confpage.py:26 spyder/plugins/editor/plugin.py:425 spyder/plugins/editor/plugin.py:2079 spyder/plugins/editor/utils/switcher.py:36 spyder/plugins/editor/widgets/codeeditor.py:5468 spyder/plugins/editor/widgets/codeeditor_widgets.py:61 spyder/plugins/editor/widgets/editor.py:324 spyder/plugins/help/confpage.py:31 spyder/plugins/help/widgets.py:337 spyder/plugins/tours/tours.py:83
 msgid "Editor"
@@ -849,7 +849,7 @@ msgstr "Points d'arrêt"
 
 #: spyder/plugins/breakpoints/plugin.py:97
 msgid "Manage code breakpoints in a unified pane."
-msgstr ""
+msgstr "Gérer les points d'arrêt du code dans un volet unifié."
 
 #: spyder/plugins/breakpoints/plugin.py:115
 msgid "List breakpoints"
@@ -873,19 +873,19 @@ msgstr "Supprimer les points d'arrêt dans tous les fichiers"
 
 #: spyder/plugins/breakpoints/widgets/main_widget.py:218
 msgid "Clear selected breakpoint"
-msgstr ""
+msgstr "Effacer le point d'arrêt sélectionné"
 
 #: spyder/plugins/breakpoints/widgets/main_widget.py:223
 msgid "Edit selected breakpoint"
-msgstr ""
+msgstr "Modifier le point d’arrêt sélectionné"
 
 #: spyder/plugins/completion/confpage.py:26
 msgid "Plugin status"
-msgstr ""
+msgstr "Statut du plugin"
 
 #: spyder/plugins/completion/confpage.py:29
 msgid "Enable code completion and linting in the editor"
-msgstr ""
+msgstr "Activer la complétion de code et le linting dans l'éditeur"
 
 #: spyder/plugins/completion/confpage.py:40
 msgid "Providers"
@@ -893,7 +893,7 @@ msgstr "Fournisseurs"
 
 #: spyder/plugins/completion/confpage.py:42
 msgid "Enable {0} provider"
-msgstr ""
+msgstr "Activer le fournisseur {0}"
 
 #: spyder/plugins/completion/confpage.py:50
 msgid "Time to wait for all providers to return (ms):"
@@ -901,7 +901,7 @@ msgstr "Il est temps d’attendre le retour de tous les fournisseurs (ms):"
 
 #: spyder/plugins/completion/confpage.py:52
 msgid "Beyond this timeout the first available provider will be returned"
-msgstr ""
+msgstr "Au-delà de ce délai, le premier fournisseur disponible sera renvoyé"
 
 #: spyder/plugins/completion/confpage.py:55
 msgid "Show completion details"
@@ -929,23 +929,23 @@ msgstr "M'avertir quand Kite peut fournir des complétions manquantes (mais n'es
 
 #: spyder/plugins/completion/confpage.py:73
 msgid "Show automatic completions after keyboard idle (ms):"
-msgstr ""
+msgstr "Afficher les complétions automatiques après la désactivation du clavier (ms):"
 
 #: spyder/plugins/completion/confpage.py:75
 msgid "Default is 300 milliseconds"
-msgstr ""
+msgstr "La valeur par défaut est de 300 millisecondes"
 
 #: spyder/plugins/completion/confpage.py:77
 msgid "Show completion details after keyboard idle (ms):"
-msgstr ""
+msgstr "Afficher les détails de complétion après l'inactivité du clavier (ms) :"
 
 #: spyder/plugins/completion/confpage.py:79
 msgid "Default is 500 milliseconds"
-msgstr ""
+msgstr "La valeur par défaut est de 500 millisecondes"
 
 #: spyder/plugins/completion/confpage.py:82
 msgid "Completions"
-msgstr ""
+msgstr "Complétions"
 
 #: spyder/plugins/completion/plugin.py:259
 msgid "Completion and linting"
@@ -953,11 +953,11 @@ msgstr "Complétion et linting"
 
 #: spyder/plugins/completion/plugin.py:262
 msgid "This plugin is in charge of handling and dispatching, as well as of receiving the responses of completion and linting requests sent to multiple providers."
-msgstr ""
+msgstr "Ce plugin est en charge de la gestion et de l'expédition, ainsi que de la réception des réponses aux demandes de complétion et de linting envoyées à plusieurs fournisseurs."
 
 #: spyder/plugins/completion/providers/fallback/provider.py:42
 msgid "Fallback"
-msgstr ""
+msgstr "Fallback"
 
 #: spyder/plugins/completion/providers/kite/client.py:118
 msgid "<code>{error}</code><br><br>Note: If you are using a VPN, please don't route requests to localhost/127.0.0.1 with it"
@@ -6352,15 +6352,15 @@ msgstr "Magique:"
 
 #: spyder/widgets/about.py:213
 msgid "Copy version info"
-msgstr ""
+msgstr "Copier Infos de Version"
 
 #: spyder/widgets/about.py:247
 msgid "Overview"
-msgstr ""
+msgstr "Vue d'ensemble"
 
 #: spyder/widgets/about.py:248
 msgid "Community"
-msgstr ""
+msgstr "Communauté"
 
 #: spyder/widgets/about.py:249
 msgid "Legal"
@@ -6423,11 +6423,11 @@ msgstr ""
 
 #: spyder/widgets/browser.py:180
 msgid "Inspect"
-msgstr ""
+msgstr "Inspecter"
 
 #: spyder/widgets/browser.py:188
 msgid "Refresh"
-msgstr ""
+msgstr "Actualiser"
 
 #: spyder/widgets/browser.py:483
 msgid "Address:"
@@ -6607,7 +6607,7 @@ msgstr "Chaîne de caractères à rechercher"
 
 #: spyder/widgets/findreplace.py:102
 msgid "Replace text"
-msgstr ""
+msgstr "Remplacer le texte"
 
 #: spyder/widgets/findreplace.py:107
 msgid "Find previous"
