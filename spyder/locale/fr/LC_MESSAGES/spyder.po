@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-18 19:39\n"
+"PO-Revision-Date: 2021-11-18 19:45\n"
 "Last-Translator: \n"
 "Language-Team: French\n"
 "MIME-Version: 1.0\n"
@@ -4195,7 +4195,7 @@ msgstr "Impossible d'ouvrir un tunnel ssh. L'erreur rencontrée était :\n\n"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:1511
 msgid "Your Python environment or installation doesn't have the <tt>spyder-kernels</tt> module or the right version of it installed (>= 2.0.1 and < 2.2.0). Without this module is not possible for Spyder to create a console for you.<br><br>You can install it by running in a system terminal:<br><br><tt>conda install spyder-kernels=2.1</tt><br><br>or<br><br><tt>pip install spyder-kernels==2.1.*</tt>"
-msgstr ""
+msgstr "Votre environnement Python ou votre installation n'a pas le module <tt>spyder-kernels</tt> ou la bonne version de celui-ci installé (>= 2.0.1 et < 2.2.0). Sans ce module, Spyder ne peut pas créer une console pour vous.<br><br>Vous pouvez l'installer en exécutant dans un terminal système :<br><br><tt>conda install spyder-kernels=2.1</tt><br><br>ou<br><br><tt>pip install spyder-kernels==2.1.*</tt>"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:1730
 msgid "Do you want to close this console?"
@@ -4211,7 +4211,7 @@ msgstr "L'erreur est :<br><br><tt>{}</tt>"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:2066
 msgid "The current file cannot be closed because it is in debug mode."
-msgstr ""
+msgstr "Le fichier courant ne peut pas être fermé car il est en mode débogage."
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:2109
 msgid "No IPython console is currently available to run <b>{}</b>.<br><br>Please open a new one and try again."
@@ -4295,7 +4295,7 @@ msgstr "Toutes les variables définies par l'utilisateur seront supprimées. Sou
 
 #: spyder/plugins/ipythonconsole/widgets/shell.py:544
 msgid "<br><br>Removing all variables...<br>"
-msgstr ""
+msgstr "<br><br>Suppression de toutes les variables...<br>"
 
 #: spyder/plugins/ipythonconsole/widgets/shell.py:727
 msgid "Changing backend to Qt for Mayavi"
@@ -4311,7 +4311,7 @@ msgstr "Redémarrage du noyau"
 
 #: spyder/plugins/ipythonconsole/widgets/shell.py:964
 msgid "It seems you're trying to use a module that doesn't come with our installer. Check <a href='{}'>this FAQ</a> in our docs to learn how to do this."
-msgstr ""
+msgstr "Il semble que vous essayez d'utiliser un module qui n'est pas fourni avec notre installateur. Consultez <a href='{}'>cette FAQ</a> dans notre documentation pour apprendre comment faire cela."
 
 #: spyder/plugins/layout/container.py:82
 msgid "Close current pane"
@@ -4327,7 +4327,7 @@ msgstr "Mode plein écran"
 
 #: spyder/plugins/layout/container.py:110
 msgid "For fullscreen mode use the macOS built-in feature"
-msgstr ""
+msgstr "Pour le mode plein écran utilisez la fonction intégrée macOS"
 
 #: spyder/plugins/layout/container.py:126
 msgid "Save current layout"
@@ -4339,7 +4339,7 @@ msgstr "Préférences"
 
 #: spyder/plugins/layout/container.py:140
 msgid "Reset to Spyder default"
-msgstr ""
+msgstr "Rétablir les valeurs par défaut de Spyder"
 
 #: spyder/plugins/layout/container.py:148
 msgid "Use next layout"
@@ -4355,11 +4355,11 @@ msgstr "Dispositions de fenêtres personnalisées"
 
 #: spyder/plugins/layout/container.py:301
 msgid "Layout <b>{0}</b> was defined programatically. It is not possible to overwrite programatically registered layouts."
-msgstr ""
+msgstr "La mise en page <b>{0}</b> a été définie par le programme. Il n'est pas possible de remplacer les mises en page enregistrées par le programme."
 
 #: spyder/plugins/layout/container.py:310
 msgid "Layout <b>{0}</b> will be overwritten. Do you want to continue?"
-msgstr ""
+msgstr "La mise en page <b>{0}</b> sera remplacée. Voulez-vous continuer ?"
 
 #: spyder/plugins/layout/container.py:368
 msgid "Window layout will be reset to default settings: this affects window position, size and dockwidgets.\n"
@@ -4373,31 +4373,31 @@ msgstr "Rétablir la disposition de fenêtres par défaut"
 
 #: spyder/plugins/layout/layouts.py:107
 msgid "Horizontal split"
-msgstr ""
+msgstr "Séparation horizontale"
 
 #: spyder/plugins/layout/layouts.py:133
 msgid "Vertical split"
-msgstr ""
+msgstr "Séparation verticale"
 
 #: spyder/plugins/layout/layouts.py:170
 msgid "Rstudio layout"
-msgstr ""
+msgstr "Mise en page Rstudio"
 
 #: spyder/plugins/layout/layouts.py:223
 msgid "Matlab layout"
-msgstr ""
+msgstr "Mise en page Matlab"
 
 #: spyder/plugins/layout/layouts.py:250
 msgid "testing layout"
-msgstr ""
+msgstr "mise en page de test"
 
 #: spyder/plugins/layout/plugin.py:79
 msgid "Layout"
-msgstr ""
+msgstr "Mise en Page"
 
 #: spyder/plugins/layout/plugin.py:82
 msgid "Layout manager"
-msgstr ""
+msgstr "Gestionnaire de mise en page"
 
 #: spyder/plugins/layout/plugin.py:372
 msgid "Error opening the custom layout.  Please close Spyder and try again.  If the issue persists, then you must use 'Reset to Spyder default' from the layout menu."
@@ -4409,7 +4409,7 @@ msgstr "La disposition de fenêtre personnalisée #%s n'a pas encore été défi
 
 #: spyder/plugins/layout/plugin.py:812
 msgid "Unlock panes and toolbars"
-msgstr ""
+msgstr "Déverrouiller les volets et les barres d'outils"
 
 #: spyder/plugins/layout/plugin.py:815
 msgid "Lock panes and toolbars"
@@ -4507,11 +4507,11 @@ msgstr "Les modules suivants ne sont pas installés sur votre ordinateur :\n"
 
 #: spyder/plugins/maininterpreter/confpage.py:252
 msgid "Please note that these changes will be applied only to new IPython consoles"
-msgstr ""
+msgstr "Veuillez noter que ces modifications ne seront appliquées qu'aux nouvelles consoles IPython"
 
 #: spyder/plugins/maininterpreter/plugin.py:50
 msgid "Main Python interpreter to open consoles."
-msgstr ""
+msgstr "Interprète Python principal pour ouvrir des consoles."
 
 #: spyder/plugins/maininterpreter/widgets/status.py:160
 msgid "Change default environment in Preferences..."
@@ -4523,7 +4523,7 @@ msgstr "Menus principaux"
 
 #: spyder/plugins/mainmenu/plugin.py:51
 msgid "Provide main application menu management."
-msgstr ""
+msgstr "Fournir la gestion du menu principal de l'application."
 
 #: spyder/plugins/mainmenu/plugin.py:71
 msgid "C&onsoles"
@@ -4539,7 +4539,7 @@ msgstr "Aide en ligne"
 
 #: spyder/plugins/onlinehelp/plugin.py:53
 msgid "Browse and search the currently installed modules interactively."
-msgstr ""
+msgstr "Parcourir et rechercher les modules actuellement installés de manière interactive."
 
 #: spyder/plugins/onlinehelp/pydoc_patch.py:802
 msgid "There was an error while retrieving documentation for the object you requested: Object could not be found"
