@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-18 19:45\n"
+"PO-Revision-Date: 2021-11-18 19:56\n"
 "Last-Translator: \n"
 "Language-Team: French\n"
 "MIME-Version: 1.0\n"
@@ -4607,11 +4607,11 @@ msgstr "Trier les fichiers par ordre alphabétique"
 
 #: spyder/plugins/outlineexplorer/plugin.py:37
 msgid "Outline Explorer"
-msgstr ""
+msgstr "Explorateur d'organisation du code"
 
 #: spyder/plugins/outlineexplorer/plugin.py:41
 msgid "Explore a file's functions, classes and methods"
-msgstr ""
+msgstr "Explorer les fonctions, classes et méthodes d'un fichier"
 
 #: spyder/plugins/outlineexplorer/widgets.py:39 spyder/widgets/dependencies.py:31
 msgid "Module"
@@ -4723,7 +4723,7 @@ msgstr "Graphes"
 
 #: spyder/plugins/plots/plugin.py:40
 msgid "Display, explore and save console generated plots."
-msgstr ""
+msgstr "Afficher, explorer et enregistrer les graphiques générés par la console."
 
 #: spyder/plugins/plots/widgets/figurebrowser.py:492
 msgid "The image is broken, please try to generate it again"
@@ -4835,7 +4835,7 @@ msgstr "Préférences"
 
 #: spyder/plugins/preferences/plugin.py:265
 msgid "This plugin provides access to Spyder preferences page"
-msgstr ""
+msgstr "Ce plugin permet d'accéder à la page des préférences de Spyder"
 
 #: spyder/plugins/preferences/widgets/container.py:113
 msgid "Reset Spyder to factory defaults"
@@ -5068,7 +5068,7 @@ msgstr "Les modifications du système de fichiers pour ce projet ne peuvent pas 
 
 #: spyder/plugins/projects/widgets/projectdialog.py:74
 msgid "Select a new or existing directory to create a new Spyder project in it. To learn more about projects, take a look at our <a href=\"{0}\">documentation</a>."
-msgstr ""
+msgstr "Sélectionnez un nouveau répertoire ou un répertoire existant pour créer un nouveau projet Spyder. Pour en savoir plus sur les projets, consultez notre <a href=\"{0}\">documentation</a>."
 
 #: spyder/plugins/projects/widgets/projectdialog.py:82
 msgid "New directory"
@@ -5104,11 +5104,11 @@ msgstr "Créer un nouveau projet"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:192
 msgid "This directory already exists!"
-msgstr ""
+msgstr "Ce répertoire existe déjà !"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:199
 msgid "This directory is already a Spyder project!"
-msgstr ""
+msgstr "Ce répertoire est déjà un projet Spyder !"
 
 #: spyder/plugins/projects/widgets/projectexplorer.py:284 spyder/plugins/projects/widgets/projectexplorer.py:302
 msgid "Project explorer"
@@ -5348,7 +5348,7 @@ msgstr "Raccourcis clavier"
 
 #: spyder/plugins/shortcuts/plugin.py:69
 msgid "Manage application, widget and actions shortcuts."
-msgstr ""
+msgstr "Gérer les raccourcis de l'application, des widgets et des actions."
 
 #: spyder/plugins/shortcuts/plugin.py:78
 msgid "Shortcuts Summary"
@@ -5468,11 +5468,11 @@ msgstr "Barre d'état"
 
 #: spyder/plugins/statusbar/plugin.py:63
 msgid "Provide Core user interface management"
-msgstr ""
+msgstr "Fournir la gestion de l'interface utilisateur principale"
 
 #: spyder/plugins/statusbar/widgets/status.py:34
 msgid "Global memory usage"
-msgstr ""
+msgstr "Utilisation de la mémoire globale"
 
 #: spyder/plugins/statusbar/widgets/status.py:48
 msgid "CPU usage"
@@ -5500,7 +5500,7 @@ msgstr "Barre d’outils"
 
 #: spyder/plugins/toolbar/plugin.py:50
 msgid "Application toolbars management."
-msgstr ""
+msgstr "Gestion des barres d'outils de l'application."
 
 #: spyder/plugins/toolbar/plugin.py:60
 msgid "Main toolbar"
@@ -5656,7 +5656,7 @@ msgstr "Explorateur de variables"
 
 #: spyder/plugins/variableexplorer/plugin.py:47
 msgid "Display, explore load and save variables in the current namespace."
-msgstr ""
+msgstr "Afficher, explorer et enregistrer les variables dans l'espace de noms courant."
 
 #: spyder/plugins/variableexplorer/widgets/arrayeditor.py:568
 msgid "It was not possible to copy values for this array"
@@ -5736,7 +5736,7 @@ msgstr "Indice :"
 
 #: spyder/plugins/variableexplorer/widgets/arrayeditor.py:787
 msgid "<u>Warning</u>: Changes are applied separately"
-msgstr ""
+msgstr "<u>Avertissement</u>: Les modifications sont appliquées séparément"
 
 #: spyder/plugins/variableexplorer/widgets/arrayeditor.py:789
 msgid "For performance reasons, changes applied to masked arrays won't be reflected in array's data (and vice-versa)."
