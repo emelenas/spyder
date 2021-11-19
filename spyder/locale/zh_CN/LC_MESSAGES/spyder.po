@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-18 17:52\n"
+"PO-Revision-Date: 2021-11-19 02:48\n"
 "Last-Translator: \n"
 "Language-Team: Chinese Simplified\n"
 "MIME-Version: 1.0\n"
@@ -5061,7 +5061,7 @@ msgstr "无法追踪该项目在文件系统上的变更，因为包含了太多
 
 #: spyder/plugins/projects/widgets/projectdialog.py:74
 msgid "Select a new or existing directory to create a new Spyder project in it. To learn more about projects, take a look at our <a href=\"{0}\">documentation</a>."
-msgstr ""
+msgstr "选择一个新的或现有的目录以在其中创建新的 Spyder 项目。 要了解更多关于项目的信息，请查看我们的 <a href=\"{0}\">文档</a>。"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:82
 msgid "New directory"
@@ -5097,11 +5097,11 @@ msgstr "创建新的项目"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:192
 msgid "This directory already exists!"
-msgstr ""
+msgstr "目录已存在！"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:199
 msgid "This directory is already a Spyder project!"
-msgstr ""
+msgstr "此目录已经是一个 Spyder 项目了！"
 
 #: spyder/plugins/projects/widgets/projectexplorer.py:284 spyder/plugins/projects/widgets/projectexplorer.py:302
 msgid "Project explorer"
