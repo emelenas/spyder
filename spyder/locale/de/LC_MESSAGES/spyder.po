@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-19 09:49\n"
+"PO-Revision-Date: 2021-11-19 10:09\n"
 "Last-Translator: \n"
 "Language-Team: German\n"
 "MIME-Version: 1.0\n"
@@ -55,7 +55,7 @@ msgstr "Andocken"
 
 #: spyder/api/widgets/main_widget.py:335 spyder/plugins/base.py:191
 msgid "Dock the pane"
-msgstr "Docken Sie den Bereich an"
+msgstr "Den Bereich andocken"
 
 #: spyder/api/widgets/main_widget.py:341 spyder/plugins/base.py:196
 msgid "Undock"
