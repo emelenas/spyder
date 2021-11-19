@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: spyder\n"
 "POT-Creation-Date: 2021-11-18 11:42-0500\n"
-"PO-Revision-Date: 2021-11-18 17:52\n"
+"PO-Revision-Date: 2021-11-19 09:49\n"
 "Last-Translator: \n"
 "Language-Team: German\n"
 "MIME-Version: 1.0\n"
@@ -19,7 +19,7 @@ msgstr ""
 
 #: spyder/api/plugin_registration/_confpage.py:26
 msgid "Here you can turn on/off any internal or external Spyder plugin to disable functionality that is not desired or to have a lighter experience. Unchecked plugins in this page will be unloaded immediately and will not be loaded the next time Spyder starts."
-msgstr ""
+msgstr "Hier können Sie jedes interne oder externe Spyder-Plugin ein-/ausschalten, um unerwünschte Funktionen zu deaktivieren oder die Bedienung zu vereinfachen. Auf dieser Seite nicht markierte Plugins werden sofort entladen und beim nächsten Start von Spyder nicht mehr geladen."
 
 #: spyder/api/plugin_registration/_confpage.py:34
 msgid "Internal plugins"
@@ -932,7 +932,7 @@ msgstr "Benachrichtigen Sie mich, wenn Kite fehlende Ergänzungen liefern kann (
 
 #: spyder/plugins/completion/confpage.py:73
 msgid "Show automatic completions after keyboard idle (ms):"
-msgstr ""
+msgstr "Automatische Vervollständigungen nach Inaktivität der Tastatur (ms) anzeigen:"
 
 #: spyder/plugins/completion/confpage.py:75
 msgid "Default is 300 milliseconds"
@@ -940,7 +940,7 @@ msgstr "Standard ist 300 Millisekunden"
 
 #: spyder/plugins/completion/confpage.py:77
 msgid "Show completion details after keyboard idle (ms):"
-msgstr ""
+msgstr "Vervollständigungsdetails nach Inaktivität der Tastatur anzeigen (ms):"
 
 #: spyder/plugins/completion/confpage.py:79
 msgid "Default is 500 milliseconds"
@@ -4032,7 +4032,7 @@ msgstr "Mit einem vorhandenen Kernel verbinden"
 
 #: spyder/plugins/ipythonconsole/widgets/kernelconnect.py:37
 msgid "<p>Please select the JSON connection file (<i>e.g.</i> <tt>kernel-1234.json</tt>) of the existing kernel, and enter the SSH information if connecting to a remote machine. To learn more about starting external kernels and connecting to them, see <a href=\"https://docs.spyder-ide.org/5/panes/ipythonconsole.html#using-external-kernels\">our documentation</a>.</p>"
-msgstr ""
+msgstr "<p>Bitte wählen Sie die JSON-Verbindungsdatei (<i>z.B.</i> <tt>kernel-1234.json</tt>) des vorhandenen Kernels aus und geben Sie die SSH-Informationen ein, wenn Sie eine Verbindung zu einem entfernten Rechner herstellen. Um mehr über das Starten externer Kernel und die Verbindung zu ihnen zu erfahren, lesen Sie <a href=\"https://docs.spyder-ide.org/5/panes/ipythonconsole.html#using-external-kernels\">unsere Dokumentation</a>.</p>"
 
 #: spyder/plugins/ipythonconsole/widgets/kernelconnect.py:50
 msgid "Connection file:"
@@ -4144,7 +4144,7 @@ msgstr "Konsole leeren"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:479
 msgid "Enter array table"
-msgstr ""
+msgstr "Array-Tabelle eingeben"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:485
 msgid "Enter array inline"
@@ -4152,7 +4152,7 @@ msgstr ""
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:504
 msgid "Special consoles"
-msgstr ""
+msgstr "Spezialkonsolen"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:539
 msgid "New Pylab console (data plotting)"
@@ -4208,7 +4208,7 @@ msgstr "Konnte keinen ssh-Tunnel öffnen. Der Fehler war:\n\n"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:1511
 msgid "Your Python environment or installation doesn't have the <tt>spyder-kernels</tt> module or the right version of it installed (>= 2.0.1 and < 2.2.0). Without this module is not possible for Spyder to create a console for you.<br><br>You can install it by running in a system terminal:<br><br><tt>conda install spyder-kernels=2.1</tt><br><br>or<br><br><tt>pip install spyder-kernels==2.1.*</tt>"
-msgstr ""
+msgstr "In Ihrer Python-Umgebung oder -Installation ist das Modul <tt>spyder-kernels</tt> oder die richtige Version davon nicht installiert (>= 2.0.1 und < 2.2.0). Ohne dieses Modul ist es für Spyder nicht möglich, eine Konsole für Sie zu erstellen.<br><br>Sie können es installieren, indem Sie in einem Systemterminal ausführen:<br><br><tt>conda install spyder-kernels=2.1</tt><br><br>or<br><br><tt>pip install spyder-kernels==2.1.*</tt>"
 
 #: spyder/plugins/ipythonconsole/widgets/main_widget.py:1730
 msgid "Do you want to close this console?"
@@ -5082,7 +5082,7 @@ msgstr "Änderungen am Dateisystem für dieses Projekt können nicht verfolgt we
 
 #: spyder/plugins/projects/widgets/projectdialog.py:74
 msgid "Select a new or existing directory to create a new Spyder project in it. To learn more about projects, take a look at our <a href=\"{0}\">documentation</a>."
-msgstr ""
+msgstr "Wählen Sie ein neues oder bestehendes Verzeichnis, um darin ein neues Spyder-Projekt zu erstellen. Wenn Sie mehr über Projekte erfahren möchten, schauen Sie sich unsere <a href=\"{0}\">Dokumentation</a> an."
 
 #: spyder/plugins/projects/widgets/projectdialog.py:82
 msgid "New directory"
@@ -5118,11 +5118,11 @@ msgstr "Neues Projekt erstellen"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:192
 msgid "This directory already exists!"
-msgstr ""
+msgstr "Dieses Verzeichnis existiert bereits!"
 
 #: spyder/plugins/projects/widgets/projectdialog.py:199
 msgid "This directory is already a Spyder project!"
-msgstr ""
+msgstr "Dieses Verzeichnis ist bereits ein Spyder-Projekt!"
 
 #: spyder/plugins/projects/widgets/projectexplorer.py:284 spyder/plugins/projects/widgets/projectexplorer.py:302
 msgid "Project explorer"
