@@ -3,6 +3,7 @@
 
 import tempfile
 import os
+from textwrap import dedent
 from unittest.mock import patch
 from pylsp import lsp, uris
 from pylsp.plugins import flake8_lint
@@ -39,12 +40,13 @@ def test_flake8_unsaved(workspace):
     assert unused_var['code'] == 'F841'
     assert unused_var['range']['start'] == {'line': 5, 'character': 1}
     assert unused_var['range']['end'] == {'line': 5, 'character': 11}
-    assert unused_var['severity'] == lsp.DiagnosticSeverity.Warning
+    assert unused_var['severity'] == lsp.DiagnosticSeverity.Error
+    assert unused_var['tags'] == [lsp.DiagnosticTag.Unnecessary]
 
 
 def test_flake8_lint(workspace):
+    name, doc = temp_document(DOC, workspace)
     try:
-        name, doc = temp_document(DOC, workspace)
         diags = flake8_lint.pylsp_lint(workspace, doc)
         msg = 'F841 local variable \'a\' is assigned to but never used'
         unused_var = [d for d in diags if d['message'] == msg][0]
@@ -53,10 +55,66 @@ def test_flake8_lint(workspace):
         assert unused_var['code'] == 'F841'
         assert unused_var['range']['start'] == {'line': 5, 'character': 1}
         assert unused_var['range']['end'] == {'line': 5, 'character': 11}
-        assert unused_var['severity'] == lsp.DiagnosticSeverity.Warning
-
+        assert unused_var['severity'] == lsp.DiagnosticSeverity.Error
     finally:
         os.remove(name)
+
+
+def test_flake8_respecting_configuration(workspace):
+    docs = [
+        ("src/__init__.py", ""),
+        ("src/a.py", DOC),
+        ("src/b.py", "import os"),
+        ("setup.cfg", dedent("""
+        [flake8]
+        ignore = E302,W191
+        per-file-ignores =
+            src/a.py:F401
+            src/b.py:W292
+        """))
+    ]
+
+    made = {}
+    for rel, contents in docs:
+        location = os.path.join(workspace.root_path, rel)
+        made[rel] = {"uri": uris.from_fs_path(location)}
+
+        os.makedirs(os.path.dirname(location), exist_ok=True)
+        with open(location, "w", encoding="utf-8") as fle:
+            fle.write(contents)
+
+        workspace.put_document(made[rel]["uri"], contents)
+        made[rel]["document"] = workspace._docs[made[rel]["uri"]]
+
+    diags = flake8_lint.pylsp_lint(workspace, made["src/a.py"]["document"])
+    assert diags == [
+        {
+            "source": "flake8",
+            "code": "F841",
+            "range": {
+                "start": {"line": 5, "character": 1},
+                "end": {"line": 5, "character": 11},
+            },
+            "message": "F841 local variable 'a' is assigned to but never used",
+            "severity": 1,
+            "tags": [1],
+        },
+    ]
+
+    diags = flake8_lint.pylsp_lint(workspace, made["src/b.py"]["document"])
+    assert diags == [
+        {
+            "source": "flake8",
+            "code": "F401",
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 0, "character": 9},
+            },
+            "message": "F401 'os' imported but unused",
+            "severity": 1,
+            "tags": [1],
+        }
+    ]
 
 
 def test_flake8_config_param(workspace):
@@ -126,7 +184,9 @@ exclude =
         flake8_lint.pylsp_lint(workspace, doc)
 
     call_args = popen_mock.call_args[0][0]
-    assert call_args == ["flake8", "-", "--exclude=blah/,file_2.py"]
+
+    init_file = os.path.join("blah", "__init__.py")
+    assert call_args == ["flake8", "-", "--exclude=blah/,file_2.py", "--stdin-display-name", init_file]
 
     os.unlink(os.path.join(workspace.root_path, "setup.cfg"))
 
@@ -153,6 +213,28 @@ exclude =
     assert len(flake8_settings["perFileIgnores"]) == 2
     assert "exclude" in flake8_settings
     assert len(flake8_settings["exclude"]) == 2
+
+    doc = workspace.get_document(doc_uri)
+    res = flake8_lint.pylsp_lint(workspace, doc)
+    assert not res
+
+    os.unlink(os.path.join(workspace.root_path, "setup.cfg"))
+
+
+def test_per_file_ignores_alternative_syntax(workspace):
+    config_str = r"""[flake8]
+per-file-ignores = **/__init__.py:F401,E402
+    """
+
+    doc_str = "print('hi')\nimport os\n"
+
+    doc_uri = uris.from_fs_path(os.path.join(workspace.root_path, "blah/__init__.py"))
+    workspace.put_document(doc_uri, doc_str)
+
+    flake8_settings = get_flake8_cfg_settings(workspace, config_str)
+
+    assert "perFileIgnores" in flake8_settings
+    assert len(flake8_settings["perFileIgnores"]) == 2
 
     doc = workspace.get_document(doc_uri)
     res = flake8_lint.pylsp_lint(workspace, doc)

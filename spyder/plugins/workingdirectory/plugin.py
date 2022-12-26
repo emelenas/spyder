@@ -62,7 +62,7 @@ class WorkingDirectory(SpyderPluginV2):
     # ------------------------------------------------------------------------
     @staticmethod
     def get_name():
-        return _('Current working directory')
+        return _('Working directory')
 
     def get_description(self):
         return _('Set the current working directory for various plugins.')
@@ -78,7 +78,11 @@ class WorkingDirectory(SpyderPluginV2):
         self.sig_current_directory_changed.connect(
             lambda path, plugin=None: self.chdir(path, plugin))
 
-        container.set_history(self.load_history())
+        cli_options = self.get_command_line_options()
+        container.set_history(
+            self.load_history(),
+            cli_options.working_directory
+        )
 
     @on_plugin_available(plugin=Plugins.Toolbar)
     def on_toolbar_available(self):
@@ -184,6 +188,8 @@ class WorkingDirectory(SpyderPluginV2):
         if sender_plugin is not None:
             container = self.get_container()
             container.chdir(directory, emit=False)
+            if ipyconsole:
+                ipyconsole.save_working_directory(directory)
 
         self.save_history()
 
@@ -202,7 +208,7 @@ class WorkingDirectory(SpyderPluginV2):
             history = [name for name in history if osp.isdir(name)]
         else:
             if workdir is None:
-                workdir = self.get_workdir()
+                workdir = self.get_container()._get_init_workdir()
 
             history = [workdir]
 

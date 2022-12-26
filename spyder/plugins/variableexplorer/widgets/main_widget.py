@@ -9,16 +9,15 @@ Variable Explorer Main Plugin Widget.
 """
 
 # Third party imports
-from qtpy.QtCore import QTimer, Signal, Slot
-from qtpy.QtWidgets import (
-    QAction, QHBoxLayout, QWidget)
+from qtpy.QtCore import QTimer, Slot
+from qtpy.QtWidgets import QAction
 
 # Local imports
 from spyder.api.config.decorators import on_conf_change
 from spyder.api.translations import get_translation
 from spyder.api.shellconnect.main_widget import ShellConnectMainWidget
 from spyder.plugins.variableexplorer.widgets.namespacebrowser import (
-    NamespaceBrowser, NamespacesBrowserFinder, VALID_VARIABLE_CHARS)
+    NamespaceBrowser)
 from spyder.utils.programs import is_module_installed
 
 # Localization
@@ -72,8 +71,6 @@ class VariableExplorerContextMenuActions:
     ImshowAction = 'imshow_action'
     SaveArrayAction = 'save_array_action'
     InsertAction = 'insert_action'
-    InsertActionAbove = 'insert_action_above'
-    InsertActionBelow = 'insert_action_below'
     RemoveAction = 'remove_action'
     RenameAction = 'rename_action'
     DuplicateAction = 'duplicate_action'
@@ -82,7 +79,8 @@ class VariableExplorerContextMenuActions:
 
 class VariableExplorerContextMenuSections:
     Edit = 'edit_section'
-    Rename = 'rename_section'
+    Insert = 'insert_section'
+    View = 'view_section'
     Resize = 'resize_section'
 
 
@@ -99,18 +97,12 @@ class VariableExplorerWidget(ShellConnectMainWidget):
     INITIAL_FREE_MEMORY_TIME_TRIGGER = 60 * 1000  # ms
     SECONDARY_FREE_MEMORY_TIME_TRIGGER = 180 * 1000  # ms
 
-    # Signals
-    sig_free_memory_requested = Signal()
-
     def __init__(self, name=None, plugin=None, parent=None):
         super().__init__(name, plugin, parent)
 
         # Widgets
         self.context_menu = None
         self.empty_context_menu = None
-
-        # --- Finder
-        self.finder = None
 
     # ---- PluginMainWidget API
     # ------------------------------------------------------------------------
@@ -203,7 +195,7 @@ class VariableExplorerWidget(ShellConnectMainWidget):
             VariableExplorerWidgetActions.Search,
             text=_("Search variable names and types"),
             icon=self.create_icon('find'),
-            toggled=self.show_finder,
+            toggled=self.toggle_finder,
             register_shortcut=True
         )
 
@@ -219,12 +211,14 @@ class VariableExplorerWidget(ShellConnectMainWidget):
         resize_rows_action = self.create_action(
             VariableExplorerContextMenuActions.ResizeRowsAction,
             text=_("Resize rows to contents"),
+            icon=self.create_icon('collapse_row'),
             triggered=self.resize_rows
         )
 
         resize_columns_action = self.create_action(
             VariableExplorerContextMenuActions.ResizeColumnsAction,
             _("Resize columns to contents"),
+            icon=self.create_icon('collapse_column'),
             triggered=self.resize_columns
         )
 
@@ -342,25 +336,31 @@ class VariableExplorerWidget(ShellConnectMainWidget):
         # ---- Context menu to show when there are variables present
         self.context_menu = self.create_menu(
             VariableExplorerWidgetMenus.PopulatedContextMenu)
-        for item in [self.edit_action, self.plot_action, self.hist_action,
-                     self.imshow_action, self.save_array_action,
-                     self.insert_action, self.remove_action, self.copy_action,
-                     self.paste_action, self.view_action]:
+        for item in [self.edit_action, self.copy_action, self.paste_action,
+                     self.rename_action, self.remove_action,
+                     self.save_array_action]:
             self.add_item_to_menu(
                 item,
                 menu=self.context_menu,
                 section=VariableExplorerContextMenuSections.Edit,
             )
 
-        for item in [self.rename_action, self.duplicate_action]:
+        for item in [self.insert_action, self.duplicate_action]:
             self.add_item_to_menu(
                 item,
                 menu=self.context_menu,
-                section=VariableExplorerContextMenuSections.Rename,
+                section=VariableExplorerContextMenuSections.Insert,
             )
 
-        for item in [resize_rows_action, resize_columns_action,
-                     self.show_minmax_action]:
+        for item in [self.view_action, self.plot_action, self.hist_action,
+                     self.imshow_action, self.show_minmax_action]:
+            self.add_item_to_menu(
+                item,
+                menu=self.context_menu,
+                section=VariableExplorerContextMenuSections.View,
+            )
+
+        for item in [resize_rows_action, resize_columns_action]:
             self.add_item_to_menu(
                 item,
                 menu=self.context_menu,
@@ -378,24 +378,20 @@ class VariableExplorerWidget(ShellConnectMainWidget):
             )
 
     def update_actions(self):
+        """Update the actions."""
         action = self.get_action(VariableExplorerWidgetActions.ToggleMinMax)
         action.setEnabled(is_module_installed('numpy'))
         nsb = self.current_widget()
-
-        for __, action in self.get_actions().items():
-            if action:
-                # IMPORTANT: Since we are defining the main actions in here
-                # and the context is WidgetWithChildrenShortcut we need to
-                # assign the same actions to the children widgets in order
-                # for shortcuts to work
-                if nsb:
-                    save_data_action = self.get_action(
-                        VariableExplorerWidgetActions.SaveData)
-                    save_data_action.setEnabled(nsb.filename is not None)
-
-                    nsb_actions = nsb.actions()
-                    if action not in nsb_actions:
-                        nsb.addAction(action)
+        if nsb:
+            save_data_action = self.get_action(
+                VariableExplorerWidgetActions.SaveData)
+            save_data_action.setEnabled(nsb.filename is not None)
+        search_action = self.get_action(VariableExplorerWidgetActions.Search)
+        if nsb is None:
+            checked = False
+        else:
+            checked = nsb.finder_is_visible()
+        search_action.setChecked(checked)
 
     @on_conf_change
     def on_section_conf_change(self, section):
@@ -406,77 +402,41 @@ class VariableExplorerWidget(ShellConnectMainWidget):
 
     # ---- Stack accesors
     # ------------------------------------------------------------------------
-    def update_finder(self, nsb, old_nsb):
-        """Initialize or update finder widget."""
-        if self.finder is None:
-            # Initialize finder/search related widgets
-            self.finder = QWidget(self)
-            self.text_finder = NamespacesBrowserFinder(
-                nsb.editor,
-                callback=nsb.editor.set_regex,
-                main=nsb,
-                regex_base=VALID_VARIABLE_CHARS)
-            self.finder.text_finder = self.text_finder
-            self.finder_close_button = self.create_toolbutton(
-                'close_finder',
-                triggered=self.hide_finder,
-                icon=self.create_icon('DialogCloseButton'),
-            )
-
-            finder_layout = QHBoxLayout()
-            finder_layout.addWidget(self.finder_close_button)
-            finder_layout.addWidget(self.text_finder)
-            finder_layout.setContentsMargins(0, 0, 0, 0)
-            self.finder.setLayout(finder_layout)
-
-            layout = self.layout()
-            layout.addSpacing(1)
-            layout.addWidget(self.finder)
-        else:
-            # Just update references to the same text_finder (Custom QLineEdit)
-            # widget to the new current NamespaceBrowser and save current
-            # finder state in the previous NamespaceBrowser
-            if old_nsb is not None:
-                self.save_finder_state(old_nsb)
-            self.text_finder.update_parent(
-                nsb.editor,
-                callback=nsb.editor.set_regex,
-                main=nsb,
-            )
-
     def switch_widget(self, nsb, old_nsb):
-        """
-        Set the current NamespaceBrowser.
-
-        This also setup the finder widget to work with the current
-        NamespaceBrowser.
-        """
-        self.update_finder(nsb, old_nsb)
-        finder_visible = nsb.set_text_finder(self.text_finder)
-        self.finder.setVisible(finder_visible)
-        search_action = self.get_action(VariableExplorerWidgetActions.Search)
-        search_action.setChecked(finder_visible)
+        """Set the current NamespaceBrowser."""
+        pass
 
     # ---- Public API
     # ------------------------------------------------------------------------
 
     def create_new_widget(self, shellwidget):
+        """Create new NamespaceBrowser."""
         nsb = NamespaceBrowser(self)
+        nsb.sig_hide_finder_requested.connect(self.hide_finder)
+        nsb.sig_free_memory_requested.connect(self.free_memory)
+        nsb.sig_start_spinner_requested.connect(self.start_spinner)
+        nsb.sig_stop_spinner_requested.connect(self.stop_spinner)
         nsb.set_shellwidget(shellwidget)
         nsb.setup()
-        nsb.sig_free_memory_requested.connect(
-            self.free_memory)
-        nsb.sig_start_spinner_requested.connect(
-            self.start_spinner)
-        nsb.sig_stop_spinner_requested.connect(
-            self.stop_spinner)
-        nsb.sig_hide_finder_requested.connect(
-            self.hide_finder)
         self._set_actions_and_menus(nsb)
+
+        # To update the Variable Explorer after execution
+        shellwidget.executed.connect(nsb.refresh_namespacebrowser)
+        shellwidget.sig_config_spyder_kernel.connect(nsb.setup_kernel)
         return nsb
 
     def close_widget(self, nsb):
+        """Close NamespaceBrowser."""
+        nsb.sig_hide_finder_requested.disconnect(self.hide_finder)
+        nsb.sig_free_memory_requested.disconnect(self.free_memory)
+        nsb.sig_start_spinner_requested.disconnect(self.start_spinner)
+        nsb.sig_stop_spinner_requested.disconnect(self.stop_spinner)
+        nsb.shellwidget.executed.disconnect(nsb.refresh_namespacebrowser)
+        nsb.shellwidget.sig_config_spyder_kernel.disconnect(
+            nsb.setup_kernel)
+
         nsb.close()
+        nsb.setParent(None)
 
     def import_data(self, filenames=None):
         """
@@ -499,37 +459,18 @@ class VariableExplorerWidget(ShellConnectMainWidget):
             nsb.reset_namespace()
 
     @Slot(bool)
-    def show_finder(self, checked):
-        if self.count():
-            nsb = self.current_widget()
-            if checked:
-                self.finder.text_finder.setText(nsb.last_find)
-            else:
-                self.save_finder_state(nsb)
-                self.finder.text_finder.setText('')
-            self.finder.setVisible(checked)
-            if self.finder.isVisible():
-                self.finder.text_finder.setFocus()
-            else:
-                nsb.editor.setFocus()
+    def toggle_finder(self, checked):
+        """Hide or show the finder."""
+        widget = self.current_widget()
+        if widget is None:
+            return
+        widget.toggle_finder(checked)
 
     @Slot()
     def hide_finder(self):
+        """Hide the finder."""
         action = self.get_action(VariableExplorerWidgetActions.Search)
         action.setChecked(False)
-        nsb = self.current_widget()
-        self.save_finder_state(nsb)
-        self.finder.text_finder.setText('')
-
-    def save_finder_state(self, nsb):
-        """
-        Save finder state (last input text and visibility).
-
-        The values are saved in the given NamespaceBrowser.
-        """
-        last_find = self.text_finder.text()
-        finder_visibility = self.finder.isVisible()
-        nsb.save_finder_state(last_find, finder_visibility)
 
     def refresh_table(self):
         if self.count():
@@ -543,9 +484,9 @@ class VariableExplorerWidget(ShellConnectMainWidget):
         """
         self.sig_free_memory_requested.emit()
         QTimer.singleShot(self.INITIAL_FREE_MEMORY_TIME_TRIGGER,
-                          self.sig_free_memory_requested.emit)
+                          self.sig_free_memory_requested)
         QTimer.singleShot(self.SECONDARY_FREE_MEMORY_TIME_TRIGGER,
-                          self.sig_free_memory_requested.emit)
+                          self.sig_free_memory_requested)
 
     def resize_rows(self):
         self._current_editor.resizeRowsToContents()

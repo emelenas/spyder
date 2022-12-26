@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/python-lsp/python-lsp-server.git
 	branch = develop
-	commit = 581da5d11f5e90879388994bdc26d6d36de7a642
-	parent = a7890871c10e93a39c38d7cbd3ac7d67e1a499a9
+	commit = 59de0f8172d2cad85798ff3ee36c3f46e2c05852
+	parent = a7af16ccb1fb1a835bb3bdfc8f959e221dcefda1
 	method = merge
 	cmdver = 0.4.3

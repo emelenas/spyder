@@ -28,7 +28,8 @@ import psutil
 # Local imports
 from spyder.api.config.mixins import SpyderConfigurationAccessor
 from spyder.config.base import (
-    DEV, get_conf_path, get_debug_level, running_in_ci, running_under_pytest)
+    DEV, get_conf_path, get_debug_level, is_pynsist, running_under_pytest)
+from spyder.config.utils import is_anaconda
 from spyder.plugins.completion.api import (
     CLIENT_CAPABILITES, SERVER_CAPABILITES,
     TEXT_DOCUMENT_SYNC_OPTIONS, CompletionRequestTypes,
@@ -157,26 +158,6 @@ class LSPClient(QObject, LSPMethodProviderMixIn, SpyderConfigurationAccessor):
 
         return location
 
-    def _clean_sys_path(self):
-        """
-        Remove from sys.path entries that come from our config system.
-
-        They will be passed to the server in the extra_paths option
-        and are not needed for the transport layer.
-        """
-        spyder_pythonpath = self.get_conf(
-            'spyder_pythonpath',
-            section='main',
-            default=[]
-        )
-
-        sys_path = sys.path[:]
-        for path in spyder_pythonpath:
-            if path in sys_path:
-                sys_path.remove(path)
-
-        return sys_path
-
     @property
     def server_log_file(self):
         """
@@ -276,11 +257,6 @@ class LSPClient(QObject, LSPMethodProviderMixIn, SpyderConfigurationAccessor):
         self.server = QProcess(self)
         env = self.server.processEnvironment()
 
-        # Use local PyLS instead of site-packages one.
-        if (DEV or running_under_pytest()) and not running_in_ci():
-            sys_path = self._clean_sys_path()
-            env.insert('PYTHONPATH', os.pathsep.join(sys_path)[:])
-
         # Adjustments for the Python language server.
         if self.language == 'python':
             # Set the PyLS current working to an empty dir inside
@@ -291,12 +267,23 @@ class LSPClient(QObject, LSPMethodProviderMixIn, SpyderConfigurationAccessor):
             if not osp.exists(cwd):
                 os.makedirs(cwd)
 
-            # On Windows, some modules (notably Matplotlib)
-            # cause exceptions if they cannot get the user home.
-            # So, we need to pass the USERPROFILE env variable to
-            # the PyLS.
-            if os.name == "nt" and "USERPROFILE" in os.environ:
-                env.insert("USERPROFILE", os.environ["USERPROFILE"])
+            if os.name == "nt":
+                # On Windows, some modules (notably Matplotlib)
+                # cause exceptions if they cannot get the user home.
+                # So, we need to pass the USERPROFILE env variable to
+                # the PyLSP.
+                if "USERPROFILE" in os.environ:
+                    env.insert("USERPROFILE", os.environ["USERPROFILE"])
+
+                # The PyLSP can't start on pip installations if APPDATA
+                # is missing and the user has installed their packages on
+                # that directory.
+                # Fixes spyder-ide/spyder#17661
+                if (
+                    not (is_anaconda() or is_pynsist())
+                    and "APPDATA" in os.environ
+                ):
+                    env.insert("APPDATA", os.environ["APPDATA"])
         else:
             # There's no need to define a cwd for other servers.
             cwd = None
@@ -336,16 +323,6 @@ class LSPClient(QObject, LSPMethodProviderMixIn, SpyderConfigurationAccessor):
                 env.keys()))
 
         self.transport.setProcessEnvironment(env)
-
-        # Modifying PYTHONPATH to run transport in development mode or
-        # tests
-        if (DEV or running_under_pytest()) and not running_in_ci():
-            sys_path = self._clean_sys_path()
-            if running_under_pytest():
-                env.insert('PYTHONPATH', os.pathsep.join(sys_path)[:])
-            else:
-                env.insert('PYTHONPATH', os.pathsep.join(sys_path)[1:])
-            self.transport.setProcessEnvironment(env)
 
         # Set up transport
         self.transport.errorOccurred.connect(self.handle_process_errors)

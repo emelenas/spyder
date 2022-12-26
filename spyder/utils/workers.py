@@ -77,7 +77,10 @@ class PythonWorker(QObject):
             error = err
 
         if not self._is_finished:
-            self.sig_finished.emit(self, output, error)
+            try:
+                self.sig_finished.emit(self, output, error)
+            except RuntimeError:
+                pass
         self._is_finished = True
 
 
@@ -225,7 +228,7 @@ class WorkerManager(QObject):
 
     def __init__(self, max_threads=10):
         """Spyder Worker Manager for Generic Workers."""
-        super(QObject, self).__init__()
+        super().__init__()
         self._queue = deque()
         self._queue_workers = deque()
         self._threads = []

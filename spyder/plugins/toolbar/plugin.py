@@ -13,7 +13,6 @@ from spyder.utils.qthelpers import SpyderAction
 from typing import Union, Optional
 
 # Local imports
-from spyder.api.exceptions import SpyderAPIError
 from spyder.api.plugins import SpyderPluginV2, Plugins
 from spyder.api.plugin_registration.decorators import (
     on_plugin_available, on_plugin_teardown)
@@ -92,7 +91,6 @@ class Toolbar(SpyderPluginV2):
         # TODO: Until all core plugins are migrated, this is needed.
         ACTION_MAP = {
             ApplicationToolbars.File: self._main.file_toolbar_actions,
-            ApplicationToolbars.Debug: self._main.debug_toolbar_actions,
             ApplicationToolbars.Run: self._main.run_toolbar_actions,
         }
         for toolbar in container.get_application_toolbars():
@@ -118,7 +116,7 @@ class Toolbar(SpyderPluginV2):
 
     def on_close(self, _unused):
         container = self.get_container()
-        container._save_visible_toolbars()
+        container.save_last_visible_toolbars()
         for toolbar in container._visible_toolbars:
             toolbar.setVisible(False)
 

@@ -43,11 +43,25 @@ def codeeditor_factory():
                         font=QFont("Monospace", 10),
                         automatic_completions=True,
                         automatic_completions_after_chars=1,
-                        automatic_completions_after_ms=200,
                         folding=False)
     editor.eol_chars = '\n'
     editor.resize(640, 480)
     return editor
+
+
+def editor_factory(new_file=True, text=None):
+    editorstack = EditorStack(None, [])
+    editorstack.set_find_widget(FindReplace(editorstack))
+    editorstack.set_io_actions(Mock(), Mock(), Mock(), Mock())
+    if new_file:
+        if not text:
+            text = ('a = 1\n'
+                    'print(a)\n'
+                    '\n'
+                    'x = 2')  # a newline is added at end
+        finfo = editorstack.new('foo.py', 'utf-8', text)
+        return editorstack, finfo.editor
+    return editorstack, None
 
 
 @pytest.fixture
@@ -57,16 +71,55 @@ def setup_editor(qtbot):
     The cursor is at the empty line below the code.
     Returns tuple with EditorStack and CodeEditor.
     """
-    text = ('a = 1\n'
-            'print(a)\n'
-            '\n'
-            'x = 2')  # a newline is added at end
-    editorStack = EditorStack(None, [])
-    editorStack.set_find_widget(FindReplace(editorStack))
-    editorStack.set_io_actions(Mock(), Mock(), Mock(), Mock())
-    finfo = editorStack.new('foo.py', 'utf-8', text)
-    qtbot.addWidget(editorStack)
-    return editorStack, finfo.editor
+    editorstack, code_editor = editor_factory()
+    qtbot.addWidget(editorstack)
+    return editorstack, code_editor
+
+
+@pytest.fixture
+def completions_editor(
+        completion_plugin_all_started, qtbot_module, request, capsys,
+        tmp_path):
+    """Editorstack instance with LSP services activated."""
+    # Create a CodeEditor instance
+    editorstack, editor = editor_factory(new_file=False)
+    qtbot_module.addWidget(editorstack)
+
+    completion_plugin, capabilities = completion_plugin_all_started
+    completion_plugin.wait_for_ms = 2000
+
+    CONF.set('completions', 'enable_code_snippets', False)
+    completion_plugin.after_configuration_update([])
+    CONF.notify_section_all_observers('completions')
+
+    file_path = tmp_path / 'test.py'
+    editor = editorstack.new(str(file_path), 'utf-8', '').editor
+    # Redirect editor LSP requests to lsp_manager
+    editor.sig_perform_completion_request.connect(
+        completion_plugin.send_request)
+
+    completion_plugin.register_file('python', str(file_path), editor)
+    editor.register_completion_capabilities(capabilities)
+
+    with qtbot_module.waitSignal(
+            editor.completions_response_signal, timeout=30000):
+        editor.start_completion_services()
+
+    def teardown():
+        editor.completion_widget.hide()
+        editor.tooltip_widget.hide()
+        editor.hide()
+
+        # Capture stderr and assert there are no errors
+        sys_stream = capsys.readouterr()
+        sys_err = sys_stream.err
+        assert sys_err == ''
+
+    request.addfinalizer(teardown)
+
+    editorstack.show()
+
+    return file_path, editorstack, editor, completion_plugin
 
 
 @pytest.fixture
@@ -174,12 +227,11 @@ def completions_codeeditor(completion_plugin_all_started, qtbot_module,
     editor.language = 'Python'
 
     completion_plugin.register_file('python', str(file_path), editor)
-    editor.start_completion_services()
     editor.register_completion_capabilities(capabilities)
 
     with qtbot_module.waitSignal(
             editor.completions_response_signal, timeout=30000):
-        editor.document_did_open()
+        editor.start_completion_services()
 
     def teardown():
         editor.completion_widget.hide()
@@ -204,7 +256,7 @@ def completions_codeeditor(completion_plugin_all_started, qtbot_module,
 @pytest.fixture
 def search_codeeditor(completions_codeeditor, qtbot_module, request):
     code_editor, _ = completions_codeeditor
-    find_replace = FindReplace(None, enable_replace=True)
+    find_replace = FindReplace(code_editor, enable_replace=True)
     find_replace.set_editor(code_editor)
     qtbot_module.addWidget(find_replace)
 

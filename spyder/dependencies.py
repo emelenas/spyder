@@ -12,8 +12,7 @@ import os.path as osp
 import sys
 
 # Local imports
-from spyder.config.base import (
-    _, DEV, is_pynsist, running_in_ci, running_under_pytest)
+from spyder.config.base import _, is_pynsist, running_in_ci, running_in_mac_app
 from spyder.utils import programs
 
 HERE = osp.dirname(osp.abspath(__file__))
@@ -30,7 +29,7 @@ PLUGIN = 'spyder plugins'
 # Versions
 # =============================================================================
 # Hard dependencies
-APPLAUNCHSERVICES_REQVER = '>=0.1.7'
+APPLAUNCHSERVICES_REQVER = '>=0.3.0'
 ATOMICWRITES_REQVER = '>=1.2.0'
 CHARDET_REQVER = '>=2.0.0'
 CLOUDPICKLE_REQVER = '>=0.5.0'
@@ -52,21 +51,22 @@ PEXPECT_REQVER = '>=4.4.0'
 PICKLESHARE_REQVER = '>=0.4'
 PSUTIL_REQVER = '>=5.3'
 PYGMENTS_REQVER = '>=2.0'
-PYLINT_REQVER = '>=2.5.0'
-PYLSP_REQVER = '>=1.3.2;<1.4.0'
-PYLSP_BLACK_REQVER = '>=1.0.0'
+PYLINT_REQVER = '>=2.5.0;<3.0'
+PYLINT_VENV_REQVER = '>=2.1.1'
+PYLSP_REQVER = '>=1.6.0;<1.7.0'
+PYLSP_BLACK_REQVER = '>=1.2.0'
 PYLS_SPYDER_REQVER = '>=0.4.0'
 PYXDG_REQVER = '>=0.26'
-PYZMQ_REQVER = '>=17'
-QDARKSTYLE_REQVER = '=3.0.2'
-QSTYLIZER_REQVER = '>=0.1.10'
-QTAWESOME_REQVER = '>=1.0.2'
-QTCONSOLE_REQVER = '>=5.2.1;<5.3.0'
-QTPY_REQVER = '>=1.5.0'
+PYZMQ_REQVER = '>=22.1.0'
+QDARKSTYLE_REQVER = '>=3.0.2;<3.1.0'
+QSTYLIZER_REQVER = '>=0.2.2'
+QTAWESOME_REQVER = '>=1.2.1'
+QTCONSOLE_REQVER = '>=5.4.0;<5.5.0'
+QTPY_REQVER = '>=2.1.0'
 RTREE_REQVER = '>=0.9.7'
 SETUPTOOLS_REQVER = '>=49.6.0'
 SPHINX_REQVER = '>=0.6.6'
-SPYDER_KERNELS_REQVER = '>=2.2.1;<2.3.0'
+SPYDER_KERNELS_REQVER = '>=2.4.0;<2.5.0'
 TEXTDISTANCE_REQVER = '>=4.2.0'
 THREE_MERGE_REQVER = '>=0.1.1'
 # None for pynsist install for now
@@ -76,7 +76,7 @@ WATCHDOG_REQVER = None if is_pynsist() else '>=0.10.3'
 
 # Optional dependencies
 CYTHON_REQVER = '>=0.21'
-MATPLOTLIB_REQVER = '>=2.0.0'
+MATPLOTLIB_REQVER = '>=3.0.0'
 NUMPY_REQVER = '>=1.7'
 PANDAS_REQVER = '>=1.1.1'
 SCIPY_REQVER = '>=0.17.0'
@@ -95,7 +95,7 @@ DESCRIPTIONS = [
      'package_name': "applaunchservices",
      'features': _("Notify macOS that Spyder can open Python files"),
      'required_version': APPLAUNCHSERVICES_REQVER,
-     'display': sys.platform == "darwin"},
+     'display': sys.platform == "darwin" and not running_in_mac_app()},
     {'modname': "atomicwrites",
      'package_name': "atomicwrites",
      'features': _("Atomic file writes in the Editor"),
@@ -179,6 +179,11 @@ DESCRIPTIONS = [
      'package_name': "pylint",
      'features': _("Static code analysis"),
      'required_version': PYLINT_REQVER},
+    {'modname': "pylint_venv",
+     'package_name': "pylint-venv",
+     'features': _("Use the same Pylint installation with different virtual"
+                   " environments"),
+     'required_version': PYLINT_VENV_REQVER},
     {'modname': 'pylsp',
      'package_name': 'python-lsp-server',
      'features': _("Code completion and linting for the Editor"),
@@ -435,14 +440,6 @@ def missing_dependencies():
     """Return the status of missing dependencies (if any)"""
     missing_deps = []
     for dependency in DEPENDENCIES:
-        # Skip checking dependencies for which we have subrepos
-        if (DEV or running_under_pytest()) and not running_in_ci():
-            repo_path = osp.normpath(osp.join(HERE, '..'))
-            subrepos_path = osp.join(repo_path, 'external-deps')
-            subrepos = os.listdir(subrepos_path)
-            if dependency.package_name in subrepos:
-                continue
-
         if dependency.kind != OPTIONAL and not dependency.check():
             missing_deps.append(dependency)
 

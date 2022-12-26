@@ -28,6 +28,20 @@ log = logging.getLogger(__name__)
 # fix for a very specific upstream issue.
 # Related: https://github.com/PyCQA/pylint/issues/3518
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = 'hide'
+DEPRECATION_CODES = {
+    'W0402',  # Uses of a deprecated module %r
+    'W1505',  # Using deprecated method %s()
+    'W1511',  # Using deprecated argument %s of method %s()
+    'W1512',  # Using deprecated class %s of module %s
+    'W1513',  # Using deprecated decorator %s()
+}
+UNNECESSITY_CODES = {
+    'W0611',  # Unused import %s
+    'W0612',  # Unused variable %r
+    'W0613',  # Unused argument %r
+    'W0614',  # Unused import %s from wildcard import
+    'W1304',  # Unused-format-string-argument
+}
 
 
 class PylintLinter:
@@ -146,13 +160,22 @@ class PylintLinter:
             elif diag['type'] == 'warning':
                 severity = lsp.DiagnosticSeverity.Warning
 
-            diagnostics.append({
+            code = diag['message-id']
+
+            diagnostic = {
                 'source': 'pylint',
                 'range': err_range,
                 'message': '[{}] {}'.format(diag['symbol'], diag['message']),
                 'severity': severity,
-                'code': diag['message-id']
-            })
+                'code': code
+            }
+
+            if code in UNNECESSITY_CODES:
+                diagnostic['tags'] = [lsp.DiagnosticTag.Unnecessary]
+            if code in DEPRECATION_CODES:
+                diagnostic['tags'] = [lsp.DiagnosticTag.Deprecated]
+
+            diagnostics.append(diagnostic)
         cls.last_diags[document.path] = diagnostics
         return diagnostics
 
@@ -178,18 +201,19 @@ def pylsp_settings():
 
 
 @hookimpl
-def pylsp_lint(config, document, is_saved):
+def pylsp_lint(config, workspace, document, is_saved):
     """Run pylint linter."""
-    settings = config.plugin_settings('pylint')
-    log.debug("Got pylint settings: %s", settings)
-    # pylint >= 2.5.0 is required for working through stdin and only
-    # available with python3
-    if settings.get('executable') and sys.version_info[0] >= 3:
-        flags = build_args_stdio(settings)
-        pylint_executable = settings.get('executable', 'pylint')
-        return pylint_lint_stdin(pylint_executable, document, flags)
-    flags = _build_pylint_flags(settings)
-    return PylintLinter.lint(document, is_saved, flags=flags)
+    with workspace.report_progress("lint: pylint"):
+        settings = config.plugin_settings('pylint')
+        log.debug("Got pylint settings: %s", settings)
+        # pylint >= 2.5.0 is required for working through stdin and only
+        # available with python3
+        if settings.get('executable') and sys.version_info[0] >= 3:
+            flags = build_args_stdio(settings)
+            pylint_executable = settings.get('executable', 'pylint')
+            return pylint_lint_stdin(pylint_executable, document, flags)
+        flags = _build_pylint_flags(settings)
+        return PylintLinter.lint(document, is_saved, flags=flags)
 
 
 def build_args_stdio(settings):
@@ -246,7 +270,7 @@ def _run_pylint_stdio(pylint_executable, document, flags):
         cmd = [pylint_executable]
         cmd.extend(flags)
         cmd.extend(['--from-stdin', document.path])
-        p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)  # pylint: disable=consider-using-with
+        p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE)
     except IOError:
         log.debug("Can't execute %s. Trying with 'python -m pylint'", pylint_executable)
         cmd = ['python', '-m', 'pylint']
@@ -295,24 +319,27 @@ def _parse_pylint_stdio_result(document, stdout):
             'W': lsp.DiagnosticSeverity.Warning,
         }
         severity = severity_map[code[0]]
-        diagnostics.append(
-            {
-                'source': 'pylint',
-                'code': code,
-                'range': {
-                    'start': {
-                        'line': line,
-                        'character': character
-                    },
-                    'end': {
-                        'line': line,
-                        # no way to determine the column
-                        'character': len(document.lines[line]) - 1
-                    }
+        diagnostic = {
+            'source': 'pylint',
+            'code': code,
+            'range': {
+                'start': {
+                    'line': line,
+                    'character': character
                 },
-                'message': msg,
-                'severity': severity,
-            }
-        )
+                'end': {
+                    'line': line,
+                    # no way to determine the column
+                    'character': len(document.lines[line]) - 1
+                }
+            },
+            'message': msg,
+            'severity': severity,
+        }
+        if code in UNNECESSITY_CODES:
+            diagnostic['tags'] = [lsp.DiagnosticTag.Unnecessary]
+        if code in DEPRECATION_CODES:
+            diagnostic['tags'] = [lsp.DiagnosticTag.Deprecated]
+        diagnostics.append(diagnostic)
 
     return diagnostics

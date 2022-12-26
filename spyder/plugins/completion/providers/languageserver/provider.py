@@ -14,6 +14,7 @@ import functools
 import logging
 import os
 import os.path as osp
+import sys
 
 # Third-party imports
 from qtpy.QtCore import Signal, Slot, QTimer
@@ -147,6 +148,8 @@ class LanguageServerProvider(SpyderCompletionProvider):
             try:
                 if self.clients_hearbeat[language] is not None:
                     self.clients_hearbeat[language].stop()
+                    self.clients_hearbeat[language].setParent(None)
+                    del self.clients_hearbeat[language]
             except (TypeError, KeyError, RuntimeError):
                 pass
 
@@ -183,11 +186,12 @@ class LanguageServerProvider(SpyderCompletionProvider):
                 self.clients_restart_timers[language] = None
                 try:
                     self.clients_hearbeat[language].stop()
+                    self.clients_hearbeat[language].setParent(None)
+                    del self.clients_hearbeat[language]
                     client['instance'].disconnect()
                     client['instance'].stop()
                 except (TypeError, KeyError, RuntimeError):
                     pass
-                self.clients_hearbeat[language] = None
                 self.report_lsp_down(language)
 
     def create_statusbar(self, parent):
@@ -260,6 +264,8 @@ class LanguageServerProvider(SpyderCompletionProvider):
                 and not running_under_pytest()):
             try:
                 self.clients_hearbeat[language].stop()
+                self.clients_hearbeat[language].setParent(None)
+                del self.clients_hearbeat[language]
             except KeyError:
                 pass
             logger.info("Automatic restart for {}...".format(language))
@@ -463,12 +469,15 @@ class LanguageServerProvider(SpyderCompletionProvider):
 
             started = language_client['status'] == self.RUNNING
 
-            # Start client heartbeat
-            timer = QTimer(self)
-            self.clients_hearbeat[language] = timer
-            timer.setInterval(self.TIME_HEARTBEAT)
-            timer.timeout.connect(functools.partial(self.check_heartbeat, language))
-            timer.start()
+            if language not in self.clients_hearbeat:
+                # completion_services for language is already running
+                # Start client heartbeat
+                timer = QTimer(self)
+                self.clients_hearbeat[language] = timer
+                timer.setInterval(self.TIME_HEARTBEAT)
+                timer.timeout.connect(functools.partial(
+                    self.check_heartbeat, language))
+                timer.start()
 
             if language_client['status'] == self.STOPPED:
                 config = language_client['config']
@@ -575,12 +584,14 @@ class LanguageServerProvider(SpyderCompletionProvider):
                 return
         self.update_lsp_configuration()
 
-    @on_conf_change(section='main', option='spyder_pythonpath')
+    @on_conf_change(section='pythonpath_manager', option='spyder_pythonpath')
     def on_pythonpath_option_update(self, value):
-        if running_under_pytest():
-            if not os.environ.get('SPY_TEST_USE_INTROSPECTION'):
-                return
-        self.update_lsp_configuration(python_only=True)
+        # This is only useful to run some self-contained tests
+        if (
+            running_under_pytest()
+            and os.environ.get('SPY_TEST_USE_INTROSPECTION')
+        ):
+            self.update_lsp_configuration(python_only=True)
 
     @on_conf_change(section='main_interpreter',
                     option=['default', 'custom_interpreter'])
@@ -658,6 +669,8 @@ class LanguageServerProvider(SpyderCompletionProvider):
                 try:
                     if self.clients_hearbeat[language] is not None:
                         self.clients_hearbeat[language].stop()
+                        self.clients_hearbeat[language].setParent(None)
+                        del self.clients_hearbeat[language]
                 except (TypeError, KeyError, RuntimeError):
                     pass
                 language_client['instance'].stop()
@@ -763,7 +776,12 @@ class LanguageServerProvider(SpyderCompletionProvider):
 
         # Autoformatting configuration
         formatter = self.get_conf('formatting')
+
+        # This is necessary because PyLSP third-party plugins can only be
+        # disabled with their module name.
         formatter = 'pylsp_black' if formatter == 'black' else formatter
+
+        # Enabling/disabling formatters
         formatters = ['autopep8', 'yapf', 'pylsp_black']
         formatter_options = {
             fmt: {
@@ -772,8 +790,12 @@ class LanguageServerProvider(SpyderCompletionProvider):
             for fmt in formatters
         }
 
-        if formatter == 'pylsp_black':
-            formatter_options['pylsp_black']['line_length'] = cs_max_line_length
+        # Setting max line length for formatters
+        # The autopep8 plugin shares the same maxLineLength value with the
+        # pycodestyle one. That's why it's not necessary to set it here.
+        # NOTE: We need to use `black` and not `pylsp_black` because that's
+        # the options' namespace of that plugin.
+        formatter_options['black'] = {'line_length': cs_max_line_length}
 
         # PyLS-Spyder configuration
         group_cells = self.get_conf(
@@ -790,22 +812,24 @@ class LanguageServerProvider(SpyderCompletionProvider):
         }
 
         # Jedi configuration
+        env_vars = os.environ.copy()  # Ensure env is indepependent of PyLSP's
+        env_vars.pop('PYTHONPATH', None)
         if self.get_conf('default', section='main_interpreter'):
-            environment = None
-            env_vars = None
+            # If not explicitly set, jedi uses PyLSP's sys.path instead of
+            # sys.executable's sys.path. This may be a bug in jedi.
+            environment = sys.executable
         else:
-            environment = self.get_conf('custom_interpreter',
+            environment = self.get_conf('executable',
                                         section='main_interpreter')
-            env_vars = os.environ.copy()
-            # external interpreter should not use internal PYTHONPATH
-            env_vars.pop('PYTHONPATH', None)
+            # External interpreter cannot have PYTHONHOME
             if running_in_mac_app():
                 env_vars.pop('PYTHONHOME', None)
 
         jedi = {
             'environment': environment,
             'extra_paths': self.get_conf('spyder_pythonpath',
-                                         section='main', default=[]),
+                                         section='pythonpath_manager',
+                                         default=[]),
             'env_vars': env_vars,
         }
         jedi_completion = {
@@ -837,6 +861,7 @@ class LanguageServerProvider(SpyderCompletionProvider):
         python_config['host'] = host
         python_config['port'] = port
 
+        # Updating options
         plugins = python_config['configurations']['pylsp']['plugins']
         plugins['pycodestyle'].update(pycodestyle)
         plugins['pyflakes'].update(pyflakes)
@@ -847,8 +872,6 @@ class LanguageServerProvider(SpyderCompletionProvider):
         plugins['jedi_signature_help'].update(jedi_signature_help)
         plugins['jedi_definition'].update(jedi_definition)
         plugins['preload']['modules'] = self.get_conf('preload_modules')
-
-        for formatter in formatters:
-            plugins[formatter] = formatter_options[formatter]
+        plugins.update(formatter_options)
 
         return python_config

@@ -12,12 +12,13 @@ Configuration manager providing access to user/site/project configuration.
 import logging
 import os
 import os.path as osp
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import weakref
 
 # Local imports
 from spyder.api.utils import PrefixedTuple
-from spyder.config.base import _, get_conf_paths, get_conf_path, get_home_dir
+from spyder.config.base import (
+    _, get_conf_paths, get_conf_path, get_home_dir, reset_config_files)
 from spyder.config.main import CONF_VERSION, DEFAULTS, NAME_MAP
 from spyder.config.types import ConfigurationKey, ConfigurationObserver
 from spyder.config.user import UserConfig, MultiUserConfig, NoDefault, cp
@@ -105,6 +106,14 @@ class ConfigurationManager(object):
         #
         # type: Dict[ConfigurationObserver, Dict[str, Set[ConfigurationKey]]]
         self._observer_map_keys = weakref.WeakKeyDictionary()
+
+        # List of options with disabled notifications.
+        # This holds a list of (section, option) options that won't be notified
+        # to observers. It can be used to temporarily disable notifications for
+        # some options.
+        #
+        # type: List[Tuple(str, ConfigurationKey)]
+        self._disabled_options = []
 
         # Setup
         self.remove_deprecated_config_locations()
@@ -350,9 +359,19 @@ class ConfigurationManager(object):
                        value: Any):
         section_observers = self._observers.get(section, {})
         option_observers = section_observers.get(option, set({}))
-        if len(option_observers) > 0:
-            logger.debug('Sending notification to observers of '
-                         f'{option} in configuration section {section}')
+
+        if (section, option) in self._disabled_options:
+            logger.debug(
+                f"Don't send notification to observers of disabled option "
+                f"{option} in configuration section {section}"
+            )
+            return
+        elif len(option_observers) > 0:
+            logger.debug(
+                f"Sending notification to observers of {option} option in "
+                f"configuration section {section}"
+            )
+
         for observer in list(option_observers):
             try:
                 observer.on_configuration_change(option, section, value)
@@ -387,6 +406,25 @@ class ConfigurationManager(object):
             except cp.NoOptionError:
                 # See above explanation.
                 pass
+
+    def disable_notifications(self, section: str, option: ConfigurationKey):
+        """Disable notitications for `option` in `section`."""
+        logger.debug(
+            f"Disable notifications for option {option} option in section "
+            f"{section}"
+        )
+        self._disabled_options.append((section, option))
+
+    def restore_notifications(self, section: str, option: ConfigurationKey):
+        """Restore notitications for disabled `option` in `section`."""
+        logger.debug(
+            f"Restore notifications for option {option} option in section "
+            f"{section}"
+        )
+        try:
+            self._disabled_options.remove((section, option))
+        except ValueError:
+            pass
 
     # --- Projects
     # ------------------------------------------------------------------------
@@ -622,7 +660,7 @@ class ConfigurationManager(object):
                 context, name = context_name.split('/', 1)
                 yield context, name, keystr
 
-        for _, (_, plugin_config) in self._plugin_configs.items():
+        for __, (__, plugin_config) in self._plugin_configs.items():
             items = plugin_config.items('shortcuts')
             if items:
                 for context_name, keystr in items:
@@ -632,9 +670,37 @@ class ConfigurationManager(object):
     def reset_shortcuts(self):
         """Reset keyboard shortcuts to default values."""
         self._user_config.reset_to_defaults(section='shortcuts')
-        for _, (_, plugin_config) in self._plugin_configs.items():
+        for __, (__, plugin_config) in self._plugin_configs.items():
             # TODO: check if the section exists?
             plugin_config.reset_to_defaults(section='shortcuts')
 
 
-CONF = ConfigurationManager()
+try:
+    CONF = ConfigurationManager()
+except Exception:
+    from qtpy.QtWidgets import QApplication, QMessageBox
+
+    # Check if there's an app already running
+    app = QApplication.instance()
+
+    # Create app, if there's none, in order to display the message below.
+    # NOTE: Don't use the functions we have to create a QApplication here
+    # because they could import CONF at some point, which would make this
+    # fallback fail.
+    # See issue spyder-ide/spyder#17889
+    if app is None:
+        app = QApplication(['Spyder'])
+        app.setApplicationName('Spyder')
+
+    reset_reply = QMessageBox.critical(
+        None, 'Spyder',
+        _("There was an error while loading Spyder configuration options. "
+          "You need to reset them for Spyder to be able to launch.\n\n"
+          "Do you want to proceed?"),
+        QMessageBox.Yes, QMessageBox.No)
+    if reset_reply == QMessageBox.Yes:
+        reset_config_files()
+        QMessageBox.information(
+            None, 'Spyder',
+            _("Spyder configuration files resetted!"))
+    os._exit(0)

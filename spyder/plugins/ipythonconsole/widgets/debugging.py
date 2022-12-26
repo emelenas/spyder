@@ -10,6 +10,7 @@ mode and Spyder
 """
 
 # Standard library imports
+import atexit
 import pdb
 import re
 
@@ -64,13 +65,24 @@ class DebuggingHistoryWidget(RichJupyterWidget):
     def __init__(self, *args, **kwargs):
         # History
         self._pdb_history_input_number = 0  # Input number for current session
-        self._saved_pdb_history_input_number = []  # for recursive debugging
-        self._pdb_history_file = PdbHistory()
-        self._pdb_history = [
-            line[-1] for line in self._pdb_history_file.get_tail(
-                self.PDB_HIST_MAX, include_latest=True)]
+        self._saved_pdb_history_input_number = {}  # for recursive debugging
+
+        # Catch any exception that prevents to create or access the history
+        # file to avoid errors.
+        # Fixes spyder-ide/spyder#18531
+        try:
+            self._pdb_history_file = PdbHistory()
+            self._pdb_history = [
+                line[-1] for line in self._pdb_history_file.get_tail(
+                    self.PDB_HIST_MAX, include_latest=True)
+            ]
+        except Exception:
+            self._pdb_history_file = None
+            self._pdb_history = []
+
         self._pdb_history_edits = {}  # Temporary history edits
         self._pdb_history_index = len(self._pdb_history)
+
         # super init
         super(DebuggingHistoryWidget, self).__init__(*args, **kwargs)
 
@@ -78,12 +90,14 @@ class DebuggingHistoryWidget(RichJupyterWidget):
     def new_history_session(self):
         """Start a new history session."""
         self._pdb_history_input_number = 0
-        self._pdb_history_file.new_session()
+        if self._pdb_history_file is not None:
+            self._pdb_history_file.new_session()
 
     def end_history_session(self):
         """End an history session."""
         self._pdb_history_input_number = 0
-        self._pdb_history_file.end_session()
+        if self._pdb_history_file is not None:
+            self._pdb_history_file.end_session()
 
     def add_to_pdb_history(self, line):
         """Add command to history"""
@@ -103,7 +117,8 @@ class DebuggingHistoryWidget(RichJupyterWidget):
         cmd = line.split(" ")[0]
         args = line.split(" ")[1:]
         is_pdb_cmd = (
-                cmd.strip() and cmd[0] != '!' and "do_" + cmd in dir(pdb.Pdb))
+            cmd.strip() and cmd[0] != '!' and "do_" + cmd in dir(pdb.Pdb)
+        )
         if self.is_pdb_using_exclamantion_mark():
             is_pdb_cmd = is_pdb_cmd or (
                 cmd.strip() and cmd[0] == '!'
@@ -112,7 +127,8 @@ class DebuggingHistoryWidget(RichJupyterWidget):
         if cmd and (not is_pdb_cmd or len(args) > 0):
             self._pdb_history.append(line)
             self._pdb_history_index = len(self._pdb_history)
-            self._pdb_history_file.store_inputs(line_num, line)
+            if self._pdb_history_file is not None:
+                self._pdb_history_file.store_inputs(line_num, line)
 
     # --- Private API (overrode by us) --------------------------------
     @property
@@ -175,23 +191,20 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
 
     def __init__(self, *args, **kwargs):
         # Communication state
-        self._pdb_in_loop = 0  # NUmber of debbuging loop we are in
+        self._pdb_recursion_level = 0  # Number of debbuging loop we are in
         self._pdb_input_ready = False  # Can we send a command now
         self._waiting_pdb_input = False  # Are we waiting on the user
         # Other state
         self._pdb_prompt = (None, None)  # prompt, password
         self._pdb_last_cmd = ''  # last command sent to pdb
         self._pdb_frame_loc = (None, None)  # fname, lineno
+        self._pdb_focus_to_editor = False  # Focus to editor after command
+                                          # execution
         # Command queue
         self._pdb_input_queue = []  # List of (code, hidden, echo_stack_entry)
         # Temporary flags
         self._tmp_reading = False
         # super init
-        # Needed to handle other configuration objects than the default CONF.
-        # Useful for changing preferences when testing while using the
-        # `ipyconsole` fixture.
-        configuration = kwargs.pop('configuration', self.CONFIGURATION)
-        self.CONFIGURATION = configuration
         super(DebuggingWidget, self).__init__(*args, **kwargs)
 
         # Adapted from qtconsole/frontend_widget.py
@@ -207,62 +220,68 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
         """
         Close the save thread and database file.
         """
-        try:
-            self._pdb_history_file.save_thread.stop()
-        except AttributeError:
-            pass
-        try:
-            self._pdb_history_file.db.close()
-        except AttributeError:
-            pass
+        if self._pdb_history_file is not None:
+            try:
+                self._pdb_history_file.save_thread.stop()
+                # Now that it was called, no need to call it at exit
+                atexit.unregister(self._pdb_history_file.save_thread.stop)
+            except AttributeError:
+                pass
+
+            try:
+                self._pdb_history_file.db.close()
+            except AttributeError:
+                pass
 
     # --- Comm API --------------------------------------------------
 
-    def set_debug_state(self, is_debugging):
+    def set_debug_state(self, recursion_level):
         """Update the debug state."""
-        if is_debugging:
+        if recursion_level > self._pdb_recursion_level:
             # Start debugging
-            if self._pdb_in_loop > 0:
-                # Recursive debugging
-                self._saved_pdb_history_input_number.append(
-                    self._pdb_history_input_number)
+            if self._pdb_recursion_level > 0:
+                # Recursive debugging, save state
+                self._saved_pdb_history_input_number[
+                    self._pdb_recursion_level] = self._pdb_history_input_number
                 self.end_history_session()
             self.new_history_session()
-            self._pdb_in_loop += 1
-        elif self._pdb_in_loop > 0:
+        elif recursion_level < self._pdb_recursion_level:
             # Stop debugging
-            self._pdb_in_loop -= 1
             self.end_history_session()
-            if self._pdb_in_loop > 0:
-                # Still debugging
+            if recursion_level > 0:
+                # Still debugging, restore state
                 self.new_history_session()
                 self._pdb_history_input_number = (
-                    self._saved_pdb_history_input_number.pop())
+                    self._saved_pdb_history_input_number.pop(
+                        recursion_level, 0))
+        else:
+            # This should not happen unless we missed some messages
+            pass
 
         # If debugging starts or stops, clear the input queue.
+        self._pdb_recursion_level = recursion_level
         self._pdb_input_queue = []
         self._pdb_frame_loc = (None, None)
 
     def _pdb_cmd_prefix(self):
         """Return the command prefix"""
         prefix = ''
-        if (self.spyder_kernel_comm.is_open() and
-                self.is_pdb_using_exclamantion_mark()):
+        if self.spyder_kernel_ready and self.is_pdb_using_exclamantion_mark():
             prefix = '!'
         return prefix
 
-    def pdb_execute_command(self, command):
+    def pdb_execute_command(self, command, focus_to_editor=False):
         """
         Execute a pdb command
         """
+        self._pdb_focus_to_editor = focus_to_editor
         self.pdb_execute(
             self._pdb_cmd_prefix() + command, hidden=False,
             echo_stack_entry=False, add_history=False)
 
     def _handle_input_request(self, msg):
         """Process an input request."""
-        if (not self.spyder_kernel_comm.is_open() and
-                msg['content']['prompt'] == "ipdb> "):
+        if not self.is_spyder_kernel and "ipdb>" in msg['content']['prompt']:
             # Check if we can guess a path from the shell content:
             self._flush_pending_stream()
             cursor = self._get_end_cursor()
@@ -294,7 +313,7 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
             If not hidden, wether the line should be added to history
         """
         # Send line to input if no comm
-        if not self.spyder_kernel_comm.is_open():
+        if not self.is_spyder_kernel:
             if not hidden:
                 self._append_plain_text(line + '\n')
             self._finalize_input_request()
@@ -342,8 +361,7 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
 
             # Emit executing
             self.executing.emit(line)
-            self.sig_pdb_state_changed.emit(
-                False, self.get_pdb_last_step())
+            self.sig_pdb_state_changed.emit(False)
 
         if self._pdb_input_ready:
             # Print the string to the console
@@ -354,47 +372,15 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
         self._pdb_input_queue.append(
             (line, hidden, echo_stack_entry, add_history))
 
-    def get_pdb_settings(self):
-        """Get pdb settings"""
-        return {
-            "breakpoints": self.get_conf(
-                'breakpoints', default={}, section='run'),
-            "pdb_ignore_lib": self.get_conf('pdb_ignore_lib'),
-            "pdb_execute_events": self.get_conf('pdb_execute_events'),
-            "pdb_use_exclamation_mark": self.is_pdb_using_exclamantion_mark(),
-            "pdb_stop_first_line": self.get_conf('pdb_stop_first_line'),
-        }
-
     # --- To Sort --------------------------------------------------
     def stop_debugging(self):
         """Stop debugging."""
-        if (self.spyder_kernel_comm.is_open() and
-                not self.is_waiting_pdb_input()):
+        if self.spyder_kernel_ready and not self.is_waiting_pdb_input():
             self.interrupt_kernel()
         self.pdb_execute_command("exit")
 
-    def set_spyder_breakpoints(self):
-        """Set Spyder breakpoints into a debugging session"""
-        self.call_kernel(interrupt=True).set_breakpoints(
-            self.get_conf('breakpoints', default={}, section='run'))
-
-    def set_pdb_ignore_lib(self, pdb_ignore_lib):
-        """Set pdb_ignore_lib into a debugging session"""
-        self.call_kernel(interrupt=True).set_pdb_ignore_lib(
-            pdb_ignore_lib)
-
-    def set_pdb_execute_events(self, pdb_execute_events):
-        """Set pdb_execute_events into a debugging session"""
-        self.call_kernel(interrupt=True).set_pdb_execute_events(
-            pdb_execute_events)
-
-    def set_pdb_use_exclamation_mark(self, pdb_use_exclamation_mark):
-        """Set pdb_use_exclamation_mark into a debugging session"""
-        self.call_kernel(interrupt=True).set_pdb_use_exclamation_mark(
-            pdb_use_exclamation_mark)
-
     def is_pdb_using_exclamantion_mark(self):
-        return self.get_conf('pdb_use_exclamation_mark')
+        return self.get_conf('pdb_use_exclamation_mark', section='debugger')
 
     def do_where(self):
         """Where was called, go to the current location."""
@@ -420,16 +406,12 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
             if (fname, lineno) != last_pdb_loc:
                 self.sig_pdb_step.emit(fname, lineno)
 
-        if 'namespace_view' in pdb_state:
-            self.set_namespace_view(pdb_state['namespace_view'])
+        if 'stack' in pdb_state:
+            pdb_stack, pdb_index = pdb_state['stack']
+            self.sig_pdb_stack.emit(pdb_stack, pdb_index)
 
-        if 'var_properties' in pdb_state:
-            self.set_var_properties(pdb_state['var_properties'])
-
-    def set_pdb_state(self, pdb_state):
-        """Set current pdb state."""
-        if pdb_state is not None and isinstance(pdb_state, dict):
-            self.refresh_from_pdb(pdb_state)
+        if 'request_pdb_input' in pdb_state:
+            self.pdb_execute(pdb_state['request_pdb_input'])
 
     def show_pdb_output(self, text):
         """Show Pdb output."""
@@ -448,19 +430,19 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
 
     def get_pdb_last_step(self):
         """Get last pdb step retrieved from a Pdb session."""
-        fname, lineno = self._pdb_frame_loc
-        if fname is None:
-            return {}
-        return {'fname': fname,
-                'lineno': lineno}
+        return self._pdb_frame_loc
 
     def is_debugging(self):
         """Check if we are debugging."""
-        return self._pdb_in_loop > 0
+        return self._pdb_recursion_level > 0
+
+    def debugging_depth(self):
+        """Debugging depth"""
+        return self._pdb_recursion_level
 
     def is_waiting_pdb_input(self):
         """Check if we are waiting a pdb input."""
-        # If the comm is not open, self._pdb_in_loop can not be set
+        # If the comm is not open, self._pdb_recursion_level can not be set
         return self.is_debugging() and self._waiting_pdb_input
 
     # ---- Public API (overrode by us) ----------------------------
@@ -481,7 +463,7 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
     # --- Private API --------------------------------------------------
     def _current_prompt(self):
         prompt = "IPdb [{}]".format(self._pdb_history_input_number + 1)
-        for i in range(self._pdb_in_loop - 1):
+        for i in range(self._pdb_recursion_level - 1):
             # Add recursive debugger prompt
             prompt = "({})".format(prompt)
         return prompt + ": "
@@ -489,7 +471,7 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
     def _current_out_prompt(self):
         """Get current out prompt."""
         prompt = "Out\u00A0\u00A0[{}]".format(self._pdb_history_input_number)
-        for i in range(self._pdb_in_loop - 1):
+        for i in range(self._pdb_recursion_level - 1):
             # Add recursive debugger prompt
             prompt = "({})".format(prompt)
         return prompt + ": "
@@ -517,9 +499,9 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
         original_complete = client.complete
 
         def complete(code, cursor_pos=None):
-            if self.is_waiting_pdb_input() and client.comm_channel:
+            if self.is_waiting_pdb_input():
                 shell_channel = client.shell_channel
-                client._shell_channel = client.comm_channel
+                client._shell_channel = client.control_channel
                 try:
                     return original_complete(code, cursor_pos)
                 finally:
@@ -596,8 +578,11 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
         """Callback used when the user inputs text in pdb."""
         self.pdb_execute(line)
 
-    def pdb_input(self, prompt, password=None):
+    def pdb_input(self, prompt, password=None, state=None):
         """Get input for a command."""
+
+        if state is not None and isinstance(state, dict):
+            self.refresh_from_pdb(state)
 
         # Replace with numbered prompt
         prompt = self._current_prompt()
@@ -622,7 +607,7 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
             # The previous code finished executing
             self.executed.emit(self._pdb_prompt)
             self.sig_pdb_prompt_ready.emit()
-            self.sig_pdb_state_changed.emit(True, self.get_pdb_last_step())
+            self.sig_pdb_state_changed.emit(True)
 
         self._pdb_input_ready = True
 
@@ -643,14 +628,16 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
             return
 
     # --- Private API (overrode by us) ----------------------------------------
-    def _show_prompt(self, prompt=None, html=False, newline=True):
+    def _show_prompt(self, prompt=None, html=False, newline=True,
+                     separator=True):
         """
         Writes a new prompt at the end of the buffer.
         """
         if prompt == self._pdb_prompt[0]:
             html = True
             prompt = '<span class="in-prompt">%s</span>' % prompt
-        super(DebuggingWidget, self)._show_prompt(prompt, html, newline)
+        super(DebuggingWidget, self)._show_prompt(prompt, html, newline,
+                                                  separator)
 
     def _event_filter_console_keypress(self, event):
         """Handle Key_Up/Key_Down while debugging."""
@@ -673,7 +660,7 @@ class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
         """Call the callback with the result of is_complete."""
         # Add a continuation prompt if not complete
         if self.is_waiting_pdb_input():
-            # As the work is done on this side, check syncronously.
+            # As the work is done on this side, check synchronously.
             complete, indent = self._is_pdb_complete(source)
             callback(complete, indent)
         else:

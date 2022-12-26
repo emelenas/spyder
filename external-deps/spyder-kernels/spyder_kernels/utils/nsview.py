@@ -16,12 +16,6 @@ from itertools import islice
 import inspect
 import re
 
-# Local imports
-from spyder_kernels.py3compat import (NUMERIC_TYPES, INT_TYPES, TEXT_TYPES,
-                                      to_text_string, is_text_string,
-                                      is_type_text_string,
-                                      is_binary_string, PY2,
-                                      to_binary_string, iteritems)
 from spyder_kernels.utils.lazymodules import (
     bs4, FakeObject, numpy as np, pandas as pd, PIL)
 
@@ -36,16 +30,27 @@ def get_numeric_numpy_types():
 
 
 def get_numpy_dtype(obj):
-    """Return NumPy data type associated to obj
-    Return None if NumPy is not available
-    or if obj is not a NumPy array or scalar"""
+    """
+    Return Numpy data type associated to `obj`.
+
+    Return None if Numpy is not available, if we get errors or if `obj` is not
+    a Numpy array or scalar.
+    """
+    # Check if NumPy is available
     if np.ndarray is not FakeObject:
-        # NumPy is available
-        if isinstance(obj, np.generic) or isinstance(obj, np.ndarray):
-        # Numpy scalars all inherit from np.generic.
-        # Numpy arrays all inherit from np.ndarray.
-        # If we check that we are certain we have one of these
-        # types then we are less likely to generate an exception below.
+        # All Numpy scalars inherit from np.generic and all Numpy arrays
+        # inherit from np.ndarray. If we check that we are certain we have one
+        # of these types then we are less likely to generate an exception
+        # below.
+        # Note: The try/except is necessary to fix spyder-ide/spyder#19516.
+        try:
+            scalar_or_array = (
+                isinstance(obj, np.generic) or isinstance(obj, np.ndarray)
+            )
+        except Exception:
+            return
+
+        if scalar_or_array:
             try:
                 return obj.dtype.type
             except (AttributeError, RuntimeError):
@@ -263,7 +268,7 @@ def default_display(value, with_module=True):
             return name + ' object of ' + module + ' module'
         return name
     except Exception:
-        type_str = to_text_string(object_type)
+        type_str = str(object_type)
         return type_str[1:-1]
 
 
@@ -274,7 +279,7 @@ def collections_display(value, level):
 
     # Get elements
     if is_dict:
-        elements = iteritems(value)
+        elements = iter(value.items())
     else:
         elements = value
 
@@ -362,27 +367,15 @@ def value_to_display(value, minmax=False, level=0):
         elif isinstance(value, pd.DataFrame):
             if level == 0:
                 cols = value.columns
-                if PY2 and len(cols) > 0:
-                    # Get rid of possible BOM utf-8 data present at the
-                    # beginning of a file, which gets attached to the first
-                    # column header when headers are present in the first
-                    # row.
-                    # Fixes Issue 2514
-                    try:
-                        ini_col = to_text_string(cols[0], encoding='utf-8-sig')
-                    except:
-                        ini_col = to_text_string(cols[0])
-                    cols = [ini_col] + [to_text_string(c) for c in cols[1:]]
-                else:
-                    cols = [to_text_string(c) for c in cols]
+                cols = [str(c) for c in cols]
                 display = 'Column names: ' + ', '.join(list(cols))
             else:
                 display = 'Dataframe'
         elif isinstance(value, bs4.element.NavigableString):
             # Fixes Issue 2448
-            display = to_text_string(value)
+            display = str(value)
             if level > 0:
-                display = u"'" + display + u"'"
+                display = "'" + display + "'"
         elif isinstance(value, pd.Index):
             if level == 0:
                 try:
@@ -391,33 +384,34 @@ def value_to_display(value, minmax=False, level=0):
                     display = value.summary()
             else:
                 display = 'Index'
-        elif is_binary_string(value):
+        elif isinstance(value, bytes):
             # We don't apply this to classes that extend string types
             # See issue 5636
-            if is_type_text_string(value):
+            if type(value) in [str, bytes]:
                 try:
-                    display = to_text_string(value, 'utf8')
+                    display = str(value, 'utf8')
                     if level > 0:
-                        display = u"'" + display + u"'"
+                        display = "'" + display + "'"
                 except:
                     display = value
                     if level > 0:
                         display = b"'" + display + b"'"
             else:
                 display = default_display(value)
-        elif is_text_string(value):
+        elif isinstance(value, str):
             # We don't apply this to classes that extend string types
             # See issue 5636
-            if is_type_text_string(value):
+            if type(value) in [str, bytes]:
                 display = value
                 if level > 0:
-                    display = u"'" + display + u"'"
+                    display = "'" + display + "'"
             else:
                 display = default_display(value)
+
         elif (isinstance(value, datetime.date) or
               isinstance(value, datetime.timedelta)):
             display = str(value)
-        elif (isinstance(value, NUMERIC_TYPES) or
+        elif (isinstance(value, (int, float, complex)) or
               isinstance(value, bool) or
               isinstance(value, numeric_numpy_types)):
             display = repr(value)
@@ -432,10 +426,10 @@ def value_to_display(value, minmax=False, level=0):
     # Truncate display at 70 chars to avoid freezing Spyder
     # because of large displays
     if len(display) > 70:
-        if is_binary_string(display):
+        if isinstance(display, bytes):
             ellipses = b' ...'
         else:
-            ellipses = u' ...'
+            ellipses = ' ...'
         display = display[:70].rstrip() + ellipses
 
     # Restore Numpy printoptions
@@ -448,7 +442,7 @@ def value_to_display(value, minmax=False, level=0):
 def display_to_value(value, default_value, ignore_errors=True):
     """Convert back to value"""
     from qtpy.compat import from_qvariant
-    value = from_qvariant(value, to_text_string)
+    value = from_qvariant(value, str)
     try:
         np_dtype = get_numpy_dtype(default_value)
         if isinstance(default_value, bool):
@@ -463,10 +457,10 @@ def display_to_value(value, default_value, ignore_errors=True):
                 value = np_dtype(complex(value))
             else:
                 value = np_dtype(value)
-        elif is_binary_string(default_value):
-            value = to_binary_string(value, 'utf8')
-        elif is_text_string(default_value):
-            value = to_text_string(value)
+        elif isinstance(default_value, bytes):
+            value = bytes(value, 'utf-8')
+        elif isinstance(default_value, str):
+            value = str(value)
         elif isinstance(default_value, complex):
             value = complex(value)
         elif isinstance(default_value, float):
@@ -499,24 +493,28 @@ def display_to_value(value, default_value, ignore_errors=True):
 # =============================================================================
 def get_type_string(item):
     """Return type string of an object."""
-    # Numpy objects (don't change the order!)
-    if isinstance(item, np.ma.MaskedArray):
-        return "MaskedArray"
-    if isinstance(item, np.matrix):
-        return "Matrix"
-    if isinstance(item, np.ndarray):
-        return "NDArray"
+    # The try/except is necessary to fix spyder-ide/spyder#19516.
+    try:
+        # Numpy objects (don't change the order!)
+        if isinstance(item, np.ma.MaskedArray):
+            return "MaskedArray"
+        if isinstance(item, np.matrix):
+            return "Matrix"
+        if isinstance(item, np.ndarray):
+            return "NDArray"
 
-    # Pandas objects
-    if isinstance(item, pd.DataFrame):
-        return "DataFrame"
-    if isinstance(item, pd.Index):
-        return type(item).__name__
-    if isinstance(item, pd.Series):
-        return "Series"
+        # Pandas objects
+        if isinstance(item, pd.DataFrame):
+            return "DataFrame"
+        if isinstance(item, pd.Index):
+            return type(item).__name__
+        if isinstance(item, pd.Series):
+            return "Series"
+    except Exception:
+        pass
 
     found = re.findall(r"<(?:type|class) '(\S*)'>",
-                       to_text_string(type(item)))
+                       str(type(item)))
     if found:
         if found[0] == 'type':
             return 'class'
@@ -534,13 +532,17 @@ def is_known_type(item):
 
 def get_human_readable_type(item):
     """Return human-readable type string of an item"""
-    if isinstance(item, (np.ndarray, np.ma.MaskedArray)):
-        return u'Array of ' + item.dtype.name
-    elif isinstance(item, PIL.Image.Image):
-        return "Image"
-    else:
-        text = get_type_string(item)
-        return text[text.find('.')+1:]
+    # The try/except is necessary to fix spyder-ide/spyder#19516.
+    try:
+        if isinstance(item, (np.ndarray, np.ma.MaskedArray)):
+            return u'Array of ' + item.dtype.name
+        elif isinstance(item, PIL.Image.Image):
+            return "Image"
+        else:
+            text = get_type_string(item)
+            return text[text.find('.')+1:]
+    except Exception:
+        return 'Unknown'
 
 
 #==============================================================================
@@ -593,11 +595,14 @@ def globalsfilter(input_dict, check_all=False, filters=None,
                   excluded_names=None, exclude_callables_and_modules=None):
     """Keep objects in namespace view according to different criteria."""
     output_dict = {}
+    def _is_string(obj):
+        return type(obj) in [str, bytes]
+
     for key, value in list(input_dict.items()):
         excluded = (
-            (exclude_private and key.startswith('_')) or
-            (exclude_capitalized and key[0].isupper()) or
-            (exclude_uppercase and key.isupper() and
+            (exclude_private and _is_string(key) and key.startswith('_')) or
+            (exclude_capitalized and _is_string(key) and key[0].isupper()) or
+            (exclude_uppercase and _is_string(key) and key.isupper() and
              len(key) > 1 and not key[1:].isdigit()) or
             (key in excluded_names) or
             (exclude_callables_and_modules and is_callable_or_module(value)) or
@@ -629,7 +634,7 @@ def get_supported_types():
     """
     from datetime import date, timedelta
     editable_types = [int, float, complex, list, set, dict, tuple, date,
-                      timedelta] + list(TEXT_TYPES) + list(INT_TYPES)
+                      timedelta, str]
     try:
         from numpy import ndarray, matrix, generic
         editable_types += [ndarray, matrix, generic]

@@ -11,29 +11,32 @@ Spyder kernel for Jupyter.
 """
 
 # Standard library imports
-from distutils.version import LooseVersion
+import faulthandler
+import json
 import logging
 import os
+import re
 import sys
+import traceback
+import tempfile
 import threading
 
 # Third-party imports
-import ipykernel
 from ipykernel.ipkernel import IPythonKernel
+from ipykernel import eventloops, get_connection_info
 from traitlets.config.loader import LazyConfigValue
+import zmq
+from zmq.utils.garbage import gc
 
 # Local imports
-from spyder_kernels.py3compat import (
-    TEXT_TYPES, to_text_string, PY3, input, TimeoutError)
-from spyder_kernels.comms.frontendcomm import FrontendComm, CommError
+from spyder_kernels.comms.frontendcomm import FrontendComm
 from spyder_kernels.utils.iofuncs import iofunctions
 from spyder_kernels.utils.mpl import (
     MPL_BACKENDS_FROM_SPYDER, MPL_BACKENDS_TO_SPYDER, INLINE_FIGURE_FORMATS)
-from spyder_kernels.utils.nsview import get_remote_data, make_remote_view
+from spyder_kernels.utils.nsview import (
+    get_remote_data, make_remote_view, get_size)
 from spyder_kernels.console.shell import SpyderShell
 
-if PY3:
-    import faulthandler
 
 
 logger = logging.getLogger(__name__)
@@ -57,10 +60,7 @@ class SpyderKernel(IPythonKernel):
 
         # All functions that can be called through the comm
         handlers = {
-            'set_breakpoints': self.set_spyder_breakpoints,
-            'set_pdb_ignore_lib': self.set_pdb_ignore_lib,
-            'set_pdb_execute_events': self.set_pdb_execute_events,
-            'set_pdb_use_exclamation_mark': self.set_pdb_use_exclamation_mark,
+            'set_pdb_configuration': self.shell.set_pdb_configuration,
             'get_value': self.get_value,
             'load_data': self.load_data,
             'save_namespace': self.save_namespace,
@@ -83,11 +83,14 @@ class SpyderKernel(IPythonKernel):
             'update_syspath': self.update_syspath,
             'is_special_kernel_valid': self.is_special_kernel_valid,
             'get_matplotlib_backend': self.get_matplotlib_backend,
-            'pdb_input_reply': self.pdb_input_reply,
-            '_interrupt_eventloop': self._interrupt_eventloop,
+            'get_mpl_interactive_backend': self.get_mpl_interactive_backend,
+            'pdb_input_reply': self.shell.pdb_input_reply,
             'enable_faulthandler': self.enable_faulthandler,
-            "flush_std": self.flush_std,
-            }
+            'get_current_frames': self.get_current_frames,
+            'request_pdb_stop': self.shell.request_pdb_stop,
+            'raise_interrupt_signal': self.shell.raise_interrupt_signal,
+            'get_fault_text': self.get_fault_text,
+        }
         for call_id in handlers:
             self.frontend_comm.register_call_handler(
                 call_id, handlers[call_id])
@@ -95,15 +98,17 @@ class SpyderKernel(IPythonKernel):
         self.namespace_view_settings = {}
         self._mpl_backend_error = None
         self._running_namespace = None
-        self._pdb_input_line = None
         self.faulthandler_handle = None
 
-    # -- Public API -----------------------------------------------------------
-    def do_shutdown(self, restart):
-        """Disable faulthandler if enabled before proceeding."""
-        self.disable_faulthandler()
-        super(SpyderKernel, self).do_shutdown(restart)
+        # Add handlers to control to process messages while debugging
+        self.control_handlers['comm_msg'] = self.control_comm_msg
+        self.control_handlers['complete_request'] = self.shell_handlers[
+            'complete_request']
 
+        # Socket to signal shell_stream locally
+        self.loopback_socket = None
+
+    # -- Public API -----------------------------------------------------------
     def frontend_call(self, blocking=False, broadcast=True,
                       timeout=None, callback=None):
         """Call the frontend."""
@@ -119,48 +124,158 @@ class SpyderKernel(IPythonKernel):
             callback=callback,
             timeout=timeout)
 
-    def flush_std(self):
-        """Flush C standard streams."""
-        sys.__stderr__.flush()
-        sys.__stdout__.flush()
-
-    def enable_faulthandler(self, fn):
+    def enable_faulthandler(self):
         """
         Open a file to save the faulthandling and identifiers for
         internal threads.
         """
-        if not PY3:
-            # Not implemented
-            return
-        self.disable_faulthandler()
-        f = open(fn, 'w')
-        self.faulthandler_handle = f
-        f.write("Main thread id:\n")
-        f.write(hex(threading.main_thread().ident))
-        f.write('\nSystem threads ids:\n')
-        f.write(" ".join([hex(thread.ident) for thread in threading.enumerate()
-                          if thread is not threading.main_thread()]))
-        f.write('\n')
-        faulthandler.enable(f)
+        fault_dir = None
+        if sys.platform.startswith('linux'):
+            # Do not use /tmp for temporary files
+            try:
+                from xdg.BaseDirectory import xdg_data_home
+                fault_dir = xdg_data_home
+                os.makedirs(fault_dir, exist_ok=True)
+            except Exception:
+                fault_dir = None
 
-    def disable_faulthandler(self):
-        """
-        Cancel the faulthandling, close the file handle and remove the file.
-        """
-        if not PY3:
-            # Not implemented
+        self.faulthandler_handle = tempfile.NamedTemporaryFile(
+            'wt', suffix='.fault', dir=fault_dir)
+        main_id = threading.main_thread().ident
+        system_ids = [
+            thread.ident for thread in threading.enumerate()
+            if thread is not threading.main_thread()
+        ]
+        faulthandler.enable(self.faulthandler_handle)
+        return self.faulthandler_handle.name, main_id, system_ids
+
+    def get_fault_text(self, fault_filename, main_id, ignore_ids):
+        """Get fault text from old run."""
+        # Read file
+        try:
+            with open(fault_filename, 'r') as f:
+                fault = f.read()
+        except FileNotFoundError:
             return
-        if self.faulthandler_handle:
-            faulthandler.disable()
-            self.faulthandler_handle.close()
-            self.faulthandler_handle = None
+        except UnicodeDecodeError as e:
+            return (
+                "Can not read fault file!\n"
+                + "UnicodeDecodeError: " + str(e))
+
+        # Remove file
+        try:
+            os.remove(fault_filename)
+        except FileNotFoundError:
+            pass
+        except PermissionError:
+            pass
+
+        # Process file
+        if not fault:
+            return
+
+        thread_regex = (
+            r"(Current thread|Thread) "
+            r"(0x[\da-f]+) \(most recent call first\):"
+            r"(?:.|\r\n|\r|\n)+?(?=Current thread|Thread|\Z)")
+        # Keep line for future improvements
+        # files_regex = r"File \"([^\"]+)\", line (\d+) in (\S+)"
+
+        text = ""
+        start_idx = 0
+        for idx, match in enumerate(re.finditer(thread_regex, fault)):
+            # Add anything non-matched
+            text += fault[start_idx:match.span()[0]]
+            start_idx = match.span()[1]
+            thread_id = int(match.group(2), base=16)
+            if thread_id != main_id:
+                if thread_id in ignore_ids:
+                    continue
+                if "wurlitzer.py" in match.group(0):
+                    # Wurlitzer threads are launched later
+                    continue
+                text += "\n" + match.group(0) + "\n"
+            else:
+                try:
+                    pattern = (r".*(?:/IPython/core/interactiveshell\.py|"
+                               r"\\IPython\\core\\interactiveshell\.py).*")
+                    match_internal = next(re.finditer(pattern, match.group(0)))
+                    end_idx = match_internal.span()[0]
+                except StopIteration:
+                    end_idx = None
+                text += "\nMain thread:\n" + match.group(0)[:end_idx] + "\n"
+
+        # Add anything after match
+        text += fault[start_idx:]
+        return text
+
+    def get_system_threads_id(self):
+        """Return the list of system threads id."""
+        ignore_threads = [
+            self.parent.poller,  # Parent poller
+            self.shell.history_manager.save_thread,  # history
+            self.parent.heartbeat,  # heartbeat
+            self.parent.iopub_thread.thread,  # iopub
+            gc.thread,  # ZMQ garbage collector thread
+            self.parent.control_thread,  # control
+        ]
+        return [
+            thread.ident for thread in ignore_threads if thread is not None]
+
+    def filter_stack(self, stack, is_main):
+        """Return the part of the stack the user needs to see."""
+        # Remove wurlitzer frames
+        for frame_summary in stack:
+            if "wurlitzer.py" in frame_summary.filename:
+                return
+        # Cleanup main thread
+        if is_main:
+            start_idx = -1
+            for idx in range(len(stack)):
+                if stack[idx].filename.endswith(
+                        ("IPython/core/interactiveshell.py",
+                         "IPython\\core\\interactiveshell.py")):
+                    start_idx = idx + 1
+            if start_idx != -1:
+                stack = stack[start_idx:]
+            else:
+                stack = []
+        return stack
+
+    def get_current_frames(self, ignore_internal_threads=True,
+                           capture_locals=False):
+        """Get the current frames."""
+        ignore_list = self.get_system_threads_id()
+        main_id = threading.main_thread().ident
+        frames = {}
+        thread_names = {thread.ident: thread.name
+                        for thread in threading.enumerate()}
+
+        for thread_id, frame in sys._current_frames().items():
+            stack = traceback.StackSummary.extract(
+                traceback.walk_stack(frame))
+            if capture_locals:
+                for f_summary, f in zip(stack, traceback.walk_stack(frame)):
+                    f_summary.locals = self.get_namespace_view(frame=f[0])
+            stack.reverse()
+            if ignore_internal_threads:
+                if thread_id in ignore_list:
+                    continue
+                stack = self.filter_stack(stack, main_id == thread_id)
+            if stack is not None:
+                if thread_id in thread_names:
+                    thread_name = thread_names[thread_id]
+                else:
+                    thread_name = str(thread_id)
+                frames[thread_name] = stack
+        return frames
 
     # --- For the Variable Explorer
     def set_namespace_view_settings(self, settings):
         """Set namespace_view_settings."""
         self.namespace_view_settings = settings
 
-    def get_namespace_view(self):
+    def get_namespace_view(self, frame=None):
         """
         Return the namespace view
 
@@ -189,7 +304,7 @@ class SpyderKernel(IPythonKernel):
 
         settings = self.namespace_view_settings
         if settings:
-            ns = self._get_current_namespace()
+            ns = self._get_current_namespace(frame=frame)
             view = make_remote_view(ns, settings, EXCLUDED_NAMES)
             return view
         else:
@@ -209,9 +324,9 @@ class SpyderKernel(IPythonKernel):
             properties = {}
             for name, value in list(data.items()):
                 properties[name] = {
-                    'is_list':  isinstance(value, (tuple, list)),
-                    'is_dict':  isinstance(value, dict),
-                    'is_set': isinstance(value, set),
+                    'is_list':  self._is_list(value),
+                    'is_dict':  self._is_dict(value),
+                    'is_set': self._is_set(value),
                     'len': self._get_len(value),
                     'is_array': self._is_array(value),
                     'is_image': self._is_image(value),
@@ -305,110 +420,34 @@ class SpyderKernel(IPythonKernel):
             return self.shell.pdb_session.do_complete(code, cursor_pos)
         return self._do_complete(code, cursor_pos)
 
-    def publish_pdb_state(self, step):
+    def interrupt_eventloop(self):
         """
-        Publish Variable Explorer state and Pdb step through
-        send_spyder_msg.
+        Interrupts the eventloop.
+
+        To be used when the main thread is blocked by a call to self.eventloop.
+        This can be called from another thread, e.g. the control thread.
+
+        note:
+        Interrupting the eventloop is only implemented when a message is
+        received on the shell channel, but this message is queued and
+        won't be processed because an `execute` message is being
+        processed.
         """
-        state = dict(
-            namespace_view=self.get_namespace_view(),
-            var_properties=self.get_var_properties(),
-            step=step
-         )
-        try:
-            self.frontend_call(blocking=False).pdb_state(state)
-        except (CommError, TimeoutError):
-            logger.debug("Could not send Pdb state to the frontend.")
+        if not self.eventloop:
+            return
 
-    def set_spyder_breakpoints(self, breakpoints):
-        """
-        Handle a message from the frontend
-        """
-        if self.shell.pdb_session:
-            self.shell.pdb_session.set_spyder_breakpoints(breakpoints)
+        if self.loopback_socket is None:
+            # Add socket to signal shell_stream locally
+            self.loopback_socket = self.shell_stream.socket.context.socket(
+                zmq.DEALER)
+            port = json.loads(get_connection_info())['shell_port']
+            self.loopback_socket.connect("tcp://127.0.0.1:%i" % port)
+            # Add dummy handler
+            self.shell_handlers["interrupt_eventloop"] = (
+                lambda stream, ident, parent: None)
 
-    def set_pdb_ignore_lib(self, state):
-        """
-        Change the "Ignore libraries while stepping" debugger setting.
-        """
-        if self.shell.pdb_session:
-            self.shell.pdb_session.pdb_ignore_lib = state
-
-    def set_pdb_execute_events(self, state):
-        """
-        Handle a message from the frontend
-        """
-        if self.shell.pdb_session:
-            self.shell.pdb_session.pdb_execute_events = state
-
-    def set_pdb_use_exclamation_mark(self, state):
-        """
-        Set an option on the current debugging session to decide wether
-        the Pdb commands needs to be prefixed by '!'
-        """
-        if self.shell.pdb_session:
-            self.shell.pdb_session.pdb_use_exclamation_mark = state
-
-    def pdb_input_reply(self, line, echo_stack_entry=True):
-        """Get a pdb command from the frontend."""
-        if self.shell.pdb_session:
-            self.shell.pdb_session._disable_next_stack_entry = (
-                not echo_stack_entry)
-        self._pdb_input_line = line
-        if self.eventloop:
-            # Interrupting the eventloop is only implemented when a message is
-            # received on the shell channel, but this message is queued and
-            # won't be processed because an `execute` message is being
-            # processed. Therefore we process the message here (comm channel)
-            # and request a dummy message to be sent on the shell channel to
-            # stop the eventloop. This will call back `_interrupt_eventloop`.
-            self.frontend_call().request_interrupt_eventloop()
-
-    def cmd_input(self, prompt=''):
-        """
-        Special input function for commands.
-        Runs the eventloop while debugging.
-        """
-        # Only works if the comm is open and this is a pdb prompt.
-        if not self.frontend_comm.is_open() or not self.shell.is_debugging():
-            return input(prompt)
-
-        # Flush output before making the request.
-        sys.stderr.flush()
-        sys.stdout.flush()
-
-        # Send the input request.
-        self._pdb_input_line = None
-        self.frontend_call().pdb_input(prompt)
-
-        # Allow GUI event loop to update
-        if PY3:
-            is_main_thread = (
-                threading.current_thread() is threading.main_thread())
-        else:
-            is_main_thread = isinstance(
-                threading.current_thread(), threading._MainThread)
-
-        # Get input by running eventloop
-        if is_main_thread and self.eventloop:
-            while self._pdb_input_line is None:
-                eventloop = self.eventloop
-                if eventloop:
-                    eventloop(self)
-                else:
-                    break
-
-        # Get input by blocking
-        if self._pdb_input_line is None:
-            self.frontend_comm.wait_until(
-                lambda: self._pdb_input_line is not None)
-
-        return self._pdb_input_line
-
-    def _interrupt_eventloop(self):
-        """Interrupts the eventloop."""
-        # Receiving the request is enough to stop the eventloop.
-        pass
+        self.session.send(
+            self.loopback_socket, self.session.msg("interrupt_eventloop"))
 
     # --- For the Help plugin
     def is_defined(self, obj, force_import=False):
@@ -448,9 +487,58 @@ class SpyderKernel(IPythonKernel):
         except Exception:
             return None
 
+    def get_mpl_interactive_backend(self):
+        """
+        Get current Matplotlib interactive backend.
+
+        This is different from the current backend because, for instance, the
+        user can set first the Qt5 backend, then the Inline one. In that case,
+        the current backend is Inline, but the current interactive one is Qt5,
+        and this backend can't be changed without a kernel restart.
+        """
+        # Mapping from frameworks to backend names.
+        mapping = {
+            'qt': 'QtAgg',
+            'tk': 'TkAgg',
+            'macosx': 'MacOSX'
+        }
+
+        # --- Get interactive framework
+        framework = None
+
+        # Detect if there is a graphical framework running by checking the
+        # eventloop function attached to the kernel.eventloop attribute (see
+        # `ipykernel.eventloops.enable_gui` for context).
+        from IPython.core.getipython import get_ipython
+        loop_func = get_ipython().kernel.eventloop
+
+        if loop_func is not None:
+            if loop_func == eventloops.loop_tk:
+                framework = 'tk'
+            elif loop_func == eventloops.loop_qt5:
+                framework = 'qt'
+            elif loop_func == eventloops.loop_cocoa:
+                framework = 'macosx'
+            else:
+                # Spyder doesn't handle other backends
+                framework = 'other'
+
+        # --- Return backend according to framework
+        if framework is None:
+            # Since no interactive backend has been set yet, this is
+            # equivalent to having the inline one.
+            return 0
+        elif framework in mapping:
+            return MPL_BACKENDS_TO_SPYDER[mapping[framework]]
+        else:
+            # This covers the case of other backends (e.g. Wx or Gtk)
+            # which users can set interactively with the %matplotlib
+            # magic but not through our Preferences.
+            return -1
+
     def set_matplotlib_backend(self, backend, pylab=False):
         """Set matplotlib backend given a Spyder backend option."""
-        mpl_backend = MPL_BACKENDS_FROM_SPYDER[to_text_string(backend)]
+        mpl_backend = MPL_BACKENDS_FROM_SPYDER[str(backend)]
         self._set_mpl_backend(mpl_backend, pylab=pylab)
 
     def set_mpl_inline_figure_format(self, figure_format):
@@ -461,11 +549,7 @@ class SpyderKernel(IPythonKernel):
 
     def set_mpl_inline_resolution(self, resolution):
         """Set inline figure resolution."""
-        if LooseVersion(ipykernel.__version__) < LooseVersion('4.5'):
-            option = 'savefig.dpi'
-        else:
-            option = 'figure.dpi'
-        self._set_mpl_inline_rc_config(option, resolution)
+        self._set_mpl_inline_rc_config('figure.dpi', resolution)
 
     def set_mpl_inline_figure_size(self, width, height):
         """Set inline figure size."""
@@ -537,7 +621,6 @@ class SpyderKernel(IPythonKernel):
         try:
             import matplotlib.pyplot as plt
             plt.close('all')
-            del plt
         except:
             pass
 
@@ -579,33 +662,46 @@ class SpyderKernel(IPythonKernel):
                 sys.path.remove(path)
 
         # Add new paths
-        # We do this in reverse order as we use `sys.path.insert(1, path)`.
-        # This ensures the end result has the correct path order.
-        for path, active in reversed(new_path_dict.items()):
-            if active:
-                sys.path.insert(1, path)
+        pypath = [path for path, active in new_path_dict.items() if active]
+        if pypath:
+            sys.path.extend(pypath)
+            os.environ.update({'PYTHONPATH': os.pathsep.join(pypath)})
+        else:
+            os.environ.pop('PYTHONPATH', None)
 
     # -- Private API ---------------------------------------------------
     # --- For the Variable Explorer
-    def _get_current_namespace(self, with_magics=False):
+    def _get_current_namespace(self, with_magics=False, frame=None):
         """
         Return current namespace
 
         This is globals() if not debugging, or a dictionary containing
         both locals() and globals() for current frame when debugging
         """
-        ns = {}
-        if self._running_namespace is None:
-            ns.update(self.shell.user_ns)
-        else:
-            # This is true when a file is executing.
-            running_globals, running_locals = self._running_namespace
-            ns.update(running_globals)
-            if running_locals is not None:
-                ns.update(running_locals)
+        if frame is not None:
+            ns = frame.f_globals.copy()
+            if self.shell._pdb_frame is frame:
+                ns.update(self.shell._pdb_locals)
+            else:
+                ns.update(frame.f_locals)
+            return ns
 
-        # Add debugging locals
-        ns.update(self.shell._pdb_locals)
+        ns = {}
+        if self.shell.is_debugging() and self.shell.pdb_session.curframe:
+            # Stopped at a pdb prompt
+            ns.update(self.shell.user_ns)
+            ns.update(self.shell._pdb_locals)
+        else:
+            # Give access to the running namespace if there is one
+            if self._running_namespace is None:
+                ns.update(self.shell.user_ns)
+            else:
+                # This is true when a file is executing.
+                running_globals, running_locals = self._running_namespace
+                ns.update(running_globals)
+                if running_locals is not None:
+                    ns.update(running_locals)
+
         # Add magics to ns so we can show help about them on the Help
         # plugin
         if with_magics:
@@ -629,7 +725,7 @@ class SpyderKernel(IPythonKernel):
     def _get_len(self, var):
         """Return sequence length"""
         try:
-            return len(var)
+            return get_size(var)
         except:
             return None
 
@@ -665,6 +761,30 @@ class SpyderKernel(IPythonKernel):
         except:
             return False
 
+    def _is_list(self, var):
+        """Return True if variable is a list or tuple."""
+        # The try/except is necessary to fix spyder-ide/spyder#19516.
+        try:
+            return isinstance(var, (tuple, list))
+        except Exception:
+            return False
+
+    def _is_dict(self, var):
+        """Return True if variable is a dictionary."""
+        # The try/except is necessary to fix spyder-ide/spyder#19516.
+        try:
+            return isinstance(var, dict)
+        except Exception:
+            return False
+
+    def _is_set(self, var):
+        """Return True if variable is a set."""
+        # The try/except is necessary to fix spyder-ide/spyder#19516.
+        try:
+            return isinstance(var, set)
+        except Exception:
+            return False
+
     def _get_array_shape(self, var):
         """Return array's shape"""
         try:
@@ -692,9 +812,8 @@ class SpyderKernel(IPythonKernel):
         where *obj* is the object represented by *text*
         and *valid* is True if object evaluation did not raise any exception
         """
-        from spyder_kernels.py3compat import is_text_string
 
-        assert is_text_string(text)
+        assert isinstance(text, str)
         ns = self._get_current_namespace(with_magics=True)
         try:
             return eval(text, ns), True
@@ -713,7 +832,12 @@ class SpyderKernel(IPythonKernel):
         """
         import traceback
         from IPython.core.getipython import get_ipython
-        import matplotlib
+
+        # Don't proceed further if there's any error while importing Matplotlib
+        try:
+            import matplotlib
+        except Exception:
+            return
 
         generic_error = (
             "\n" + "="*73 + "\n"
@@ -777,7 +901,7 @@ class SpyderKernel(IPythonKernel):
         try:
             base_config = "{option} = "
             value_line = (
-                "'{value}'" if isinstance(value, TEXT_TYPES) else "{value}")
+                "'{value}'" if isinstance(value, str) else "{value}")
             config_line = base_config + value_line
             get_ipython().run_line_magic(
                 'config',
@@ -849,3 +973,32 @@ class SpyderKernel(IPythonKernel):
             return self.comm_manager.comms[comm_id]
         except KeyError:
             pass
+
+    def control_comm_msg(self, stream, ident, msg):
+        """
+        Handler for comm_msg messages from control channel.
+
+        If comm is not open yet, cache message.
+        """
+        content = msg['content']
+        comm_id = content['comm_id']
+        comm = self.comm_manager.get_comm(comm_id)
+        if comm is None:
+            self.frontend_comm.cache_message(comm_id, msg)
+            return
+        try:
+            comm.handle_msg(msg)
+        except Exception:
+            self.comm_manager.log.error(
+                'Exception in comm_msg for %s', comm_id, exc_info=True)
+
+    def pre_handler_hook(self):
+        """Hook to execute before calling message handler"""
+        pass
+
+    def post_handler_hook(self):
+        """Hook to execute after calling message handler"""
+        # keep ipykernel behavior of resetting sigint every call
+        self.shell.register_debugger_sigint()
+        # Reset tracing function so that pdb.set_trace works
+        sys.settrace(None)

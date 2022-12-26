@@ -33,6 +33,7 @@ from spyder.config.user import NoDefault
 from spyder.plugins.mainmenu.api import ApplicationMenus, ToolsMenuSections
 from spyder.plugins.preferences.widgets.container import (
     PreferencesActions, PreferencesContainer)
+from spyder.plugins.pythonpath.api import PythonpathActions
 from spyder.plugins.toolbar.api import ApplicationToolbars, MainToolbarSections
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,6 @@ class Preferences(SpyderPluginV2):
 
     NAME = 'preferences'
     CONF_SECTION = 'preferences'
-    REQUIRES = [Plugins.Application]
     OPTIONAL = [Plugins.MainMenu, Plugins.Toolbar]
     CONF_FILE = False
     CONTAINER_CLASS = PreferencesContainer
@@ -274,6 +274,7 @@ class Preferences(SpyderPluginV2):
 
         container.sig_show_preferences_requested.connect(
             lambda: self.open_dialog(main.prefs_dialog_size))
+        container.sig_reset_preferences_requested.connect(self.reset)
 
     @on_plugin_available(plugin=Plugins.MainMenu)
     def on_main_menu_available(self):
@@ -299,14 +300,9 @@ class Preferences(SpyderPluginV2):
         toolbar.add_item_to_application_toolbar(
             container.show_action,
             toolbar_id=ApplicationToolbars.Main,
-            section=MainToolbarSections.ApplicationSection
+            section=MainToolbarSections.ApplicationSection,
+            before=PythonpathActions.Manager
         )
-
-    @on_plugin_available(plugin=Plugins.Application)
-    def on_application_available(self):
-        container = self.get_container()
-        container.sig_reset_preferences_requested.connect(self.reset)
-
 
     @on_plugin_teardown(plugin=Plugins.MainMenu)
     def on_main_menu_teardown(self):
@@ -330,11 +326,6 @@ class Preferences(SpyderPluginV2):
             toolbar_id=ApplicationToolbars.Main
         )
 
-    @on_plugin_teardown(plugin=Plugins.Application)
-    def on_application_teardown(self):
-        container = self.get_container()
-        container.sig_reset_preferences_requested.disconnect(self.reset)
-
     @Slot()
     def reset(self):
         answer = QMessageBox.warning(self.main, _("Warning"),
@@ -343,9 +334,10 @@ class Preferences(SpyderPluginV2):
              QMessageBox.Yes | QMessageBox.No)
         if answer == QMessageBox.Yes:
             os.environ['SPYDER_RESET'] = 'True'
-            application = self.get_plugin(Plugins.Application)
-            application.sig_restart_requested.emit()
+            self.sig_restart_requested.emit()
 
-    def can_close(self) -> bool:
+    def on_close(self, cancelable=False):
         container = self.get_container()
-        return not container.is_dialog_open()
+        if container.is_preferences_open():
+            container.close_preferences()
+        return True

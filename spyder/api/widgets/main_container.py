@@ -43,7 +43,7 @@ class PluginMainContainer(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
     the plugin, then this attribute should have a `None` value.
     """
 
-    # --- Signals
+    # ---- Signals
     # ------------------------------------------------------------------------
     sig_free_memory_requested = Signal()
     """
@@ -101,6 +101,17 @@ class PluginMainContainer(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
     error dialog.
     """
 
+    sig_unmaximize_plugin_requested = Signal((), (object,))
+    """
+    This signal is emitted to inform the main window that it needs to
+    unmaximize the currently maximized plugin, if any.
+
+    Parameters
+    ----------
+    plugin_instance: SpyderDockablePlugin
+        Unmaximize plugin only if it is not `plugin_instance`.
+    """
+
     def __init__(self, name, plugin, parent=None):
         if PYQT5:
             super().__init__(parent=parent, class_parent=plugin)
@@ -108,7 +119,7 @@ class PluginMainContainer(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
             QWidget.__init__(self, parent)
             SpyderWidgetMixin.__init__(self, class_parent=plugin)
 
-        # Attributes
+        # ---- Attributes
         # --------------------------------------------------------------------
         self._name = name
         self._plugin = plugin
@@ -128,7 +139,13 @@ class PluginMainContainer(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         self.setMaximumWidth(0)
         self.setMaximumHeight(0)
 
-    # --- API: methods to define or override
+    # ---- Public Qt overridden methods
+    # -------------------------------------------------------------------------
+    def closeEvent(self, event):
+        self.on_close()
+        super().closeEvent(event)
+
+    # ---- API: methods to define or override
     # ------------------------------------------------------------------------
     def setup(self):
         """
@@ -146,3 +163,11 @@ class PluginMainContainer(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         raise NotImplementedError(
             'A PluginMainContainer subclass must define a `update_actions` '
             'method!')
+
+    def on_close(self):
+        """
+        Perform actions before the container is closed.
+
+        This method **must** only operate on local attributes.
+        """
+        pass

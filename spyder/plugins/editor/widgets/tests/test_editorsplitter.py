@@ -56,12 +56,11 @@ def editor_splitter_lsp(qtbot_module, completion_plugin_all_started, request):
         callback = options['codeeditor']
         completions.register_file(
             language.lower(), filename, callback)
-        callback.start_completion_services()
         callback.register_completion_capabilities(capabilities)
 
         with qtbot_module.waitSignal(
                 callback.completions_response_signal, timeout=30000):
-            callback.document_did_open()
+            callback.start_completion_services()
 
     def register_editorstack(editorstack):
         editorstack.sig_perform_completion_request.connect(
@@ -70,12 +69,10 @@ def editor_splitter_lsp(qtbot_module, completion_plugin_all_started, request):
         editorstack.register_completion_capabilities(capabilities, 'python')
 
     def clone(editorstack, template=None):
-        # editorstack.clone_from(template)
-        editor_stack = EditorStack(None, [])
-        editor_stack.set_find_widget(Mock())
-        editor_stack.set_io_actions(Mock(), Mock(), Mock(), Mock())
+        editorstack.set_find_widget(Mock())
+        editorstack.set_io_actions(Mock(), Mock(), Mock(), Mock())
         # Emulate "cloning"
-        editorsplitter.editorstack.new('test.py', 'utf-8', text)
+        editorstack.new('test.py', 'utf-8', text)
 
     mock_plugin = Mock()
     editorsplitter = EditorSplitter(

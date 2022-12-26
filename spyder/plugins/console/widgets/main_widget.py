@@ -95,9 +95,6 @@ class ConsoleWidget(PluginMainWidget):
     # Request to show a status message on the main window
     sig_show_status_requested = Signal(str)
 
-    # Request the main application to quit.
-    sig_quit_requested = Signal()
-
     sig_help_requested = Signal(dict)
     """
     This signal is emitted to request help on a given object `name`.
@@ -108,8 +105,8 @@ class ConsoleWidget(PluginMainWidget):
         Example `{'name': str, 'ignore_unknown': bool}`.
     """
 
-    def __init__(self, name, plugin, parent=None, configuration=None):
-        super().__init__(name, plugin, parent, configuration=configuration)
+    def __init__(self, name, plugin, parent=None):
+        super().__init__(name, plugin, parent)
 
         logger.info("Initializing...")
 
@@ -117,17 +114,30 @@ class ConsoleWidget(PluginMainWidget):
         self.error_traceback = ''
         self.dismiss_error = False
 
+        # Header message
+        message = _(
+            "Spyder Internal Console\n\n"
+            "This console is used to report application\n"
+            "internal errors and to inspect Spyder\n"
+            "internals with the following commands:\n"
+            "  spy.app, spy.window, dir(spy)\n\n"
+            "Please do not use it to run your code\n\n"
+        )
+
+        # Options that come from the command line
+        cli_options = plugin.get_command_line_options()
+        profile = cli_options.profile
+        multithreaded = cli_options.multithreaded
+
         # Widgets
         self.dialog_manager = DialogManager()
         self.error_dlg = None
         self.shell = InternalShell(  # TODO: Move to use SpyderWidgetMixin?
-            parent=parent,
-            namespace=self.get_conf('namespace', {}),
-            commands=self.get_conf('commands', []),
-            message=self.get_conf('message', ''),
+            commands=[],
+            message=message,
             max_line_count=self.get_conf('max_line_count'),
-            profile=self.get_conf('profile', False),
-            multithreaded=self.get_conf('multithreaded', False),
+            profile=profile,
+            multithreaded=multithreaded,
         )
         self.find_widget = FindReplace(self)
 
@@ -139,6 +149,7 @@ class ConsoleWidget(PluginMainWidget):
 
         # Layout
         layout = QVBoxLayout()
+        layout.setSpacing(0)
         layout.addWidget(self.shell)
         layout.addWidget(self.find_widget)
         self.setLayout(layout)
@@ -175,7 +186,7 @@ class ConsoleWidget(PluginMainWidget):
         run_action = self.create_action(
             ConsoleWidgetActions.Run,
             text=_("&Run..."),
-            tip=_("Run a Python script"),
+            tip=_("Run a Python file"),
             icon=self.create_icon('run_small'),
             triggered=self.run_script,
         )
@@ -416,7 +427,6 @@ class ConsoleWidget(PluginMainWidget):
                 self.error_dlg = SpyderErrorDialog(self)
                 self.error_dlg.set_color_scheme(
                     self.get_conf('selected', section='appearance'))
-                self.error_dlg.close_btn.clicked.connect(self.close_error_dlg)
                 self.error_dlg.rejected.connect(self.remove_error_dlg)
                 self.error_dlg.details.sig_go_to_error_requested.connect(
                     self.go_to_error)
@@ -445,15 +455,17 @@ class ConsoleWidget(PluginMainWidget):
         """
         Close error dialog.
         """
-        if self.error_dlg.dismiss_box.isChecked():
-            self.dismiss_error = True
-
-        self.error_dlg.reject()
+        if self.error_dlg:
+            self.error_dlg.reject()
 
     def remove_error_dlg(self):
         """
         Remove error dialog.
         """
+        if self.error_dlg.dismiss_box.isChecked():
+            self.dismiss_error = True
+
+        self.error_dlg.disconnect()
         self.error_dlg = None
 
     @Slot()
@@ -493,9 +505,9 @@ class ConsoleWidget(PluginMainWidget):
             self.shell.interpreter.restore_stds()
             filename, _selfilter = getopenfilename(
                 self,
-                _("Run Python script"),
+                _("Run Python file"),
                 getcwd_or_home(),
-                _("Python scripts") + " (*.py ; *.pyw ; *.ipy)",
+                _("Python files") + " (*.py ; *.pyw ; *.ipy)",
             )
             self.shell.interpreter.redirect_stds()
 

@@ -202,6 +202,9 @@ class FigureBrowser(QWidget, SpyderWidgetMixin):
                 self.change_auto_fit_plotting(value)
             elif option == 'mute_inline_plotting':
                 self.mute_inline_plotting = value
+                if self.shellwidget:
+                    self.shellwidget.set_mute_inline_plotting(value)
+
             elif option == 'show_plot_outline':
                 self.show_fig_outline_in_viewer(value)
             elif option == 'save_dir':
@@ -238,7 +241,7 @@ class FigureBrowser(QWidget, SpyderWidgetMixin):
     def set_shellwidget(self, shellwidget):
         """Bind the shellwidget instance to the figure browser"""
         self.shellwidget = shellwidget
-        shellwidget.set_figurebrowser(self)
+        self.shellwidget.set_mute_inline_plotting(self.mute_inline_plotting)
         shellwidget.sig_new_inline_figure.connect(self._handle_new_figure)
 
     def _handle_new_figure(self, fig, fmt):
@@ -499,7 +502,12 @@ class FigureViewer(QScrollArea, SpyderWidgetMixin):
 
     def get_scaling(self):
         """Get the current scaling of the figure in percent."""
-        return round(self.figcanvas.width() / self.figcanvas.fwidth * 100)
+        width = self.figcanvas.width()
+        fwidth = self.figcanvas.fwidth
+        if fwidth != 0:
+            return round(width / fwidth * 100)
+        else:
+            return 100
 
     def reset_original_image(self):
         """Reset the image to its original size."""
@@ -1007,13 +1015,14 @@ class FigureThumbnail(QWidget):
         """
         fwidth = self.canvas.fwidth
         fheight = self.canvas.fheight
-        if fwidth / fheight > 1:
-            canvas_width = max_canvas_size
-            canvas_height = canvas_width / fwidth * fheight
-        else:
-            canvas_height = max_canvas_size
-            canvas_width = canvas_height / fheight * fwidth
-        self.canvas.setFixedSize(int(canvas_width), int(canvas_height))
+        if fheight != 0:
+            if fwidth / fheight > 1:
+                canvas_width = max_canvas_size
+                canvas_height = canvas_width / fwidth * fheight
+            else:
+                canvas_height = max_canvas_size
+                canvas_width = canvas_height / fheight * fwidth
+            self.canvas.setFixedSize(int(canvas_width), int(canvas_height))
         self.layout().setColumnMinimumWidth(0, max_canvas_size)
 
     def eventFilter(self, widget, event):

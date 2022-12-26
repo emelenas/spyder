@@ -19,10 +19,10 @@ from qtpy.compat import (getexistingdirectory, getopenfilename, from_qvariant,
 from qtpy.QtCore import Qt, Signal, Slot, QRegExp
 from qtpy.QtGui import QColor, QRegExpValidator, QTextOption
 from qtpy.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox,
-                            QFontComboBox, QGridLayout, QGroupBox, QHBoxLayout,
-                            QLabel, QLineEdit, QMessageBox, QPushButton,
-                            QRadioButton, QSpinBox, QVBoxLayout, QWidget,
-                            QPlainTextEdit, QTabWidget)
+                            QFileDialog, QFontComboBox, QGridLayout, QGroupBox,
+                            QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                            QPlainTextEdit, QPushButton, QRadioButton,
+                            QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 # Local imports
 from spyder.config.base import _
@@ -68,7 +68,13 @@ class ConfigPage(QWidget):
 
     def __init__(self, parent, apply_callback=None):
         QWidget.__init__(self, parent)
+
+        # Callback to call before saving settings to disk
+        self.pre_apply_callback = None
+
+        # Callback to call after saving settings to disk
         self.apply_callback = apply_callback
+
         self.is_modified = False
 
     def initialize(self):
@@ -103,7 +109,11 @@ class ConfigPage(QWidget):
     def apply_changes(self):
         """Apply changes callback"""
         if self.is_modified:
+            if self.pre_apply_callback is not None:
+                self.pre_apply_callback()
+
             self.save_to_conf()
+
             if self.apply_callback is not None:
                 self.apply_callback()
 
@@ -189,8 +199,8 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
                 text = to_text_string(lineedit.text())
                 if not validator(text):
                     QMessageBox.critical(self, self.get_name(),
-                                     "%s:<br><b>%s</b>" % (invalid_msg, text),
-                                     QMessageBox.Ok)
+                                         f"{invalid_msg}:<br><b>{text}</b>",
+                                         QMessageBox.Ok)
                     return False
 
         if self.tabs is not None and status:
@@ -231,6 +241,11 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
             data = self.get_option(option, default, section=sec)
             if getattr(lineedit, 'content_type', None) == list:
                 data = ', '.join(data)
+            else:
+                # Make option value a string to prevent errors when using it
+                # as widget text.
+                # See spyder-ide/spyder#18929
+                data = str(data)
             lineedit.setText(data)
             lineedit.textChanged.connect(lambda _, opt=option, sect=sec:
                                          self.has_been_modified(sect, opt))
@@ -271,9 +286,9 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
                     index = None
             if index:
                 combobox.setCurrentIndex(index)
-            combobox.currentIndexChanged.connect(lambda _foo, opt=option, sect=sec:
-                                                 self.has_been_modified(
-                                                     sect, opt))
+            combobox.currentIndexChanged.connect(
+                lambda _foo, opt=option, sect=sec:
+                    self.has_been_modified(sect, opt))
             if combobox.restart_required:
                 if sec is None:
                     self.restart_options[option] = combobox.label_text
@@ -566,7 +581,7 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
         browsedir.setLayout(layout)
         return browsedir
 
-    def select_file(self, edit, filters=None):
+    def select_file(self, edit, filters=None, **kwargs):
         """Select File"""
         basedir = osp.dirname(to_text_string(edit.text()))
         if not osp.isdir(basedir):
@@ -574,7 +589,8 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
         if filters is None:
             filters = _("All files (*)")
         title = _("Select file")
-        filename, _selfilter = getopenfilename(self, title, basedir, filters)
+        filename, _selfilter = getopenfilename(self, title, basedir, filters,
+                                               **kwargs)
         if filename:
             edit.setText(filename)
 
@@ -733,7 +749,9 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
             msg)
         browse_btn = QPushButton(ima.icon('FileIcon'), '', self)
         browse_btn.setToolTip(_("Select file"))
-        browse_btn.clicked.connect(lambda: self.select_file(edit, filters))
+        options = QFileDialog.DontResolveSymlinks
+        browse_btn.clicked.connect(
+            lambda: self.select_file(edit, filters, options=options))
 
         layout = QGridLayout()
         layout.addWidget(combobox, 0, 0, 0, 9)
@@ -759,7 +777,7 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
         if fontfilters is not None:
             fontbox.setFontFilters(fontfilters)
 
-        sizelabel = QLabel("  "+_("Size"))
+        sizelabel = QLabel("  " + _("Size"))
         sizebox = QSpinBox()
         sizebox.setRange(7, 100)
         self.fontboxes[(fontbox, sizebox)] = option
@@ -810,26 +828,19 @@ class SpyderConfigPage(ConfigPage, ConfigAccessMixin):
 
     def prompt_restart_required(self):
         """Prompt the user with a request to restart."""
-        restart_opts = self.restart_options
-        changed_opts = self.changed_options
-        options = [restart_opts[o] for o in changed_opts if o in restart_opts]
+        message = _(
+            "One or more of the settings you changed requires a restart to be "
+            "applied.<br><br>"
+            "Do you wish to restart now?"
+        )
 
-        if len(options) == 1:
-            msg_start = _("Spyder needs to restart to change the following "
-                          "setting:")
-        else:
-            msg_start = _("Spyder needs to restart to change the following "
-                          "settings:")
-        msg_end = _("Do you wish to restart now?")
+        answer = QMessageBox.information(
+            self,
+            _("Information"),
+            message,
+            QMessageBox.Yes | QMessageBox.No
+        )
 
-        msg_options = u""
-        for option in options:
-            msg_options += u"<li>{0}</li>".format(option)
-
-        msg_title = _("Information")
-        msg = u"{0}<ul>{1}</ul><br>{2}".format(msg_start, msg_options, msg_end)
-        answer = QMessageBox.information(self, msg_title, msg,
-                                         QMessageBox.Yes | QMessageBox.No)
         if answer == QMessageBox.Yes:
             self.restart()
 

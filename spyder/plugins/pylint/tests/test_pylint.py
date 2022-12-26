@@ -13,6 +13,7 @@ import os.path as osp
 from unittest.mock import Mock, MagicMock
 
 # Third party imports
+from flaky import flaky
 import pytest
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QApplication, QMainWindow
@@ -27,9 +28,13 @@ if QApplication.instance() is None:
 
 # Local imports
 from spyder.api.plugin_registration.registry import PLUGIN_REGISTRY
+from spyder.config.base import running_in_ci
 from spyder.config.manager import CONF
+from spyder.config.utils import is_anaconda
 from spyder.plugins.pylint.plugin import Pylint
 from spyder.plugins.pylint.utils import get_pylintrc_path
+from spyder.utils.conda import get_list_conda_envs
+from spyder.utils.misc import get_python_executable
 
 # pylint: disable=redefined-outer-name
 
@@ -74,7 +79,7 @@ class MainWindowMock(QMainWindow):
             'projects': self.projects
         }
 
-    def get_plugin(self, plugin_name):
+    def get_plugin(self, plugin_name, error=True):
         return PLUGIN_REGISTRY.get_plugin(plugin_name)
 
 
@@ -90,6 +95,11 @@ def pylint_plugin(mocker, qtbot):
     plugin = Pylint(parent=main_window, configuration=CONF)
     plugin._register()
     plugin.set_conf("history_filenames", [])
+
+    # This avoids possible errors in our tests for not being available while
+    # running them.
+    plugin.set_conf('executable', get_python_executable(),
+                    section='main_interpreter')
 
     widget = plugin.get_widget()
     widget.resize(640, 480)
@@ -189,7 +199,7 @@ def pylintrc_files(pylintrc_search_paths, request):
 def test_get_pylintrc_path(pylintrc_files, mocker):
     """Test that get_pylintrc_path finds the expected one in the hierarchy."""
     search_paths, expected_path, __ = pylintrc_files
-    mocker.patch("pylint.config.os.path.expanduser",
+    mocker.patch("os.path.expanduser",
                  return_value=search_paths[HOME_DIR])
     actual_path = get_pylintrc_path(
         search_paths=list(search_paths.values()),
@@ -216,11 +226,12 @@ def test_pylint_widget_noproject(pylint_plugin, pylint_test_script, mocker,
     assert pylint_data[1] is not None
 
 
+@flaky(max_runs=3)
 def test_pylint_widget_pylintrc(
         pylint_plugin, pylint_test_script, pylintrc_files, mocker, qtbot):
     """Test that entire pylint widget gets results depending on pylintrc."""
     search_paths, __, bad_names = pylintrc_files
-    mocker.patch("pylint.config.os.path.expanduser",
+    mocker.patch("os.path.expanduser",
                  return_value=search_paths[HOME_DIR])
     mocker.patch("spyder.plugins.pylint.main_widget.getcwd_or_home",
                  return_value=search_paths[WORKING_DIR])
@@ -278,6 +289,49 @@ def test_pylint_max_history_conf(pylint_plugin, pylint_test_scripts):
 
     assert pylint_widget.filecombo.count() == 1
     assert 'test_script_2.py' in pylint_widget.curr_filenames[0]
+
+
+@flaky(max_runs=3)
+@pytest.mark.parametrize("custom_interpreter", [True, False])
+@pytest.mark.skipif(not is_anaconda(), reason='Only works with Anaconda')
+@pytest.mark.skipif(not running_in_ci(), reason='Only works on CIs')
+def test_custom_interpreter(pylint_plugin, tmp_path, qtbot,
+                            custom_interpreter):
+    """Test that the plugin works as expected with custom interpreters."""
+    # Get conda env to use
+    conda_env = [
+        env[0] for env in get_list_conda_envs().values()
+        if 'jedi-test-env' in env[0]
+    ][0]
+
+    # Set custom interpreter
+    if custom_interpreter:
+        pylint_plugin.set_conf('default', False, section='main_interpreter')
+        pylint_plugin.set_conf('executable', conda_env,
+                               section='main_interpreter')
+    else:
+        pylint_plugin.set_conf('default', True, section='main_interpreter')
+        pylint_plugin.set_conf('executable', get_python_executable(),
+                               section='main_interpreter')
+
+    # Write test code to file
+    file_path = tmp_path / 'test_custom_interpreter.py'
+    file_path.write_text('import flask')
+
+    # Run analysis and get its data
+    pylint_widget = pylint_plugin.get_widget()
+    pylint_plugin.start_code_analysis(filename=str(file_path))
+    qtbot.waitUntil(
+        lambda: pylint_widget.get_data(file_path)[1] is not None,
+        timeout=5000)
+    pylint_data = pylint_widget.get_data(filename=str(file_path))
+
+    # Assert no import errors are reported for custom interpreters
+    errors = pylint_data[1][3]["E:"]
+    if custom_interpreter:
+        assert not errors
+    else:
+        assert errors
 
 
 if __name__ == "__main__":

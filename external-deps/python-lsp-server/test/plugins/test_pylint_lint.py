@@ -4,10 +4,8 @@
 
 import contextlib
 import os
-import sys
 import tempfile
 
-from test import py2_only, py3_only, IS_PY3
 from pylsp import lsp, uris
 from pylsp.workspace import Document
 from pylsp.plugins import pylint_lint
@@ -44,60 +42,47 @@ def write_temp_doc(document, contents):
 
 def test_pylint(config, workspace):
     with temp_document(DOC, workspace) as doc:
-        diags = pylint_lint.pylsp_lint(config, doc, True)
+        diags = pylint_lint.pylsp_lint(config, workspace, doc, True)
 
         msg = '[unused-import] Unused import sys'
         unused_import = [d for d in diags if d['message'] == msg][0]
 
         assert unused_import['range']['start'] == {'line': 0, 'character': 0}
         assert unused_import['severity'] == lsp.DiagnosticSeverity.Warning
-
-        if IS_PY3:
-            # test running pylint in stdin
-            config.plugin_settings('pylint')['executable'] = 'pylint'
-            diags = pylint_lint.pylsp_lint(config, doc, True)
-
-            msg = 'Unused import sys (unused-import)'
-            unused_import = [d for d in diags if d['message'] == msg][0]
-
-            assert unused_import['range']['start'] == {
-                'line': 0,
-                'character': 0,
-            }
-            assert unused_import['severity'] == lsp.DiagnosticSeverity.Warning
-
-
-@py3_only
-def test_syntax_error_pylint_py3(config, workspace):
-    with temp_document(DOC_SYNTAX_ERR, workspace) as doc:
-        diag = pylint_lint.pylsp_lint(config, doc, True)[0]
-
-        if sys.version_info[:2] >= (3, 10):
-            assert diag['message'].count("[syntax-error] expected ':'")
-        else:
-            assert diag['message'].startswith('[syntax-error] invalid syntax')
-        # Pylint doesn't give column numbers for invalid syntax.
-        assert diag['range']['start'] == {'line': 0, 'character': 12}
-        assert diag['severity'] == lsp.DiagnosticSeverity.Error
+        assert unused_import['tags'] == [lsp.DiagnosticTag.Unnecessary]
 
         # test running pylint in stdin
         config.plugin_settings('pylint')['executable'] = 'pylint'
-        diag = pylint_lint.pylsp_lint(config, doc, True)[0]
+        diags = pylint_lint.pylsp_lint(config, workspace, doc, True)
 
-        assert diag['message'].count("expected ':'") or diag['message'].startswith('invalid syntax')
+        msg = 'Unused import sys (unused-import)'
+        unused_import = [d for d in diags if d['message'] == msg][0]
+
+        assert unused_import['range']['start'] == {
+            'line': 0,
+            'character': 0,
+        }
+        assert unused_import['severity'] == lsp.DiagnosticSeverity.Warning
+
+
+def test_syntax_error_pylint(config, workspace):
+    with temp_document(DOC_SYNTAX_ERR, workspace) as doc:
+        diag = pylint_lint.pylsp_lint(config, workspace, doc, True)[0]
+
+        assert diag['message'].startswith("[syntax-error]")
+        assert diag['message'].count("expected ':'") or diag['message'].count('invalid syntax')
         # Pylint doesn't give column numbers for invalid syntax.
         assert diag['range']['start'] == {'line': 0, 'character': 12}
         assert diag['severity'] == lsp.DiagnosticSeverity.Error
+        assert 'tags' not in diag
 
+        # test running pylint in stdin
+        config.plugin_settings('pylint')['executable'] = 'pylint'
+        diag = pylint_lint.pylsp_lint(config, workspace, doc, True)[0]
 
-@py2_only
-def test_syntax_error_pylint_py2(config, workspace):
-    with temp_document(DOC_SYNTAX_ERR, workspace) as doc:
-        diag = pylint_lint.pylsp_lint(config, doc, True)[0]
-
-        assert diag['message'].startswith('[syntax-error] invalid syntax')
+        assert diag['message'].count("expected ':'") or diag['message'].count('invalid syntax')
         # Pylint doesn't give column numbers for invalid syntax.
-        assert diag['range']['start'] == {'line': 0, 'character': 0}
+        assert diag['range']['start'] == {'line': 0, 'character': 12}
         assert diag['severity'] == lsp.DiagnosticSeverity.Error
 
 
@@ -106,7 +91,7 @@ def test_lint_free_pylint(config, workspace):
     # match pylint's naming requirements. We should be keeping this file clean
     # though, so it works for a test of an empty lint.
     assert not pylint_lint.pylsp_lint(
-        config, Document(uris.from_fs_path(__file__), workspace), True)
+        config, workspace, Document(uris.from_fs_path(__file__), workspace), True)
 
 
 def test_lint_caching(workspace):
@@ -140,7 +125,7 @@ def test_lint_caching(workspace):
 def test_per_file_caching(config, workspace):
     # Ensure that diagnostics are cached per-file.
     with temp_document(DOC, workspace) as doc:
-        assert pylint_lint.pylsp_lint(config, doc, True)
+        assert pylint_lint.pylsp_lint(config, workspace, doc, True)
 
     assert not pylint_lint.pylsp_lint(
-        config, Document(uris.from_fs_path(__file__), workspace), False)
+        config, workspace, Document(uris.from_fs_path(__file__), workspace), False)

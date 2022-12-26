@@ -13,14 +13,17 @@ This is the main widget used in the Variable Explorer plugin
 # Standard library imports
 import os
 import os.path as osp
+from pickle import UnpicklingError
+import tarfile
 
 # Third library imports
 from qtpy import PYQT5
 from qtpy.compat import getopenfilenames, getsavefilename
 from qtpy.QtCore import Qt, Signal, Slot
 from qtpy.QtGui import QCursor
-from qtpy.QtWidgets import (QApplication, QHBoxLayout, QInputDialog,
+from qtpy.QtWidgets import (QApplication, QInputDialog,
                             QMessageBox, QVBoxLayout, QWidget)
+from spyder_kernels.comms.commbase import CommError
 from spyder_kernels.utils.iofuncs import iofunctions
 from spyder_kernels.utils.misc import fix_reference_name
 from spyder_kernels.utils.nsview import REMOTE_SETTINGS
@@ -28,11 +31,12 @@ from spyder_kernels.utils.nsview import REMOTE_SETTINGS
 # Local imports
 from spyder.api.translations import get_translation
 from spyder.api.widgets.mixins import SpyderWidgetMixin
+from spyder.config.utils import IMPORT_EXT
 from spyder.widgets.collectionseditor import RemoteCollectionsEditorTableView
 from spyder.plugins.variableexplorer.widgets.importwizard import ImportWizard
 from spyder.utils import encoding
 from spyder.utils.misc import getcwd_or_home, remove_backslashes
-from spyder.widgets.helperwidgets import FinderLineEdit
+from spyder.widgets.helperwidgets import FinderWidget
 
 
 # Localization
@@ -40,6 +44,9 @@ _ = get_translation('spyder')
 
 # Constants
 VALID_VARIABLE_CHARS = r"[^\w+*=¡!¿?'\"#$%&()/<>\-\[\]{}^`´;,|¬]*\w"
+
+# Max time before giving up when making a blocking call to the kernel
+CALL_KERNEL_TIMEOUT = 30
 
 
 class NamespaceBrowser(QWidget, SpyderWidgetMixin):
@@ -64,13 +71,28 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
 
         # Attributes
         self.filename = None
-        self.text_finder = None
-        self.last_find = ''
-        self.finder_is_visible = False
 
         # Widgets
         self.editor = None
         self.shellwidget = None
+        self.finder = None
+
+    def toggle_finder(self, show):
+        """Show and hide the finder."""
+        self.finder.set_visible(show)
+        if not show:
+            self.editor.setFocus()
+
+    def do_find(self, text):
+        """Search for text."""
+        if self.editor is not None:
+            self.editor.do_find(text)
+
+    def finder_is_visible(self):
+        """Check if the finder is visible."""
+        if self.finder is None:
+            return False
+        return self.finder.isVisible()
 
     def setup(self):
         """
@@ -79,7 +101,7 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
         assert self.shellwidget is not None
 
         if self.editor is not None:
-            self.shellwidget.set_namespace_view_settings()
+            self.set_namespace_view_settings()
             self.refresh_table()
         else:
             # Widgets
@@ -88,6 +110,16 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
                 data=None,
                 shellwidget=self.shellwidget,
                 create_menu=False,
+            )
+            key_filter_dict = {
+                Qt.Key_Up: self.editor.previous_row,
+                Qt.Key_Down: self.editor.next_row
+            }
+            self.finder = FinderWidget(
+                self,
+                find_on_change=True,
+                regex_base=VALID_VARIABLE_CHARS,
+                key_filter_dict=key_filter_dict
             )
 
             # Signals
@@ -99,10 +131,16 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
             self.editor.sig_editor_shown.connect(
                 self.sig_stop_spinner_requested)
 
+            self.finder.sig_find_text.connect(self.do_find)
+            self.finder.sig_hide_finder_requested.connect(
+                self.sig_hide_finder_requested)
+
             # Layout
             layout = QVBoxLayout()
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self.editor)
+            layout.addSpacing(1)
+            layout.addWidget(self.finder)
             self.setLayout(layout)
 
     def get_view_settings(self):
@@ -116,37 +154,44 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
     def set_shellwidget(self, shellwidget):
         """Bind shellwidget instance to namespace browser"""
         self.shellwidget = shellwidget
-        shellwidget.set_namespacebrowser(self)
-
-    def set_text_finder(self, text_finder):
-        """Bind NamespaceBrowsersFinder to namespace browser."""
-        self.text_finder = text_finder
-        if self.finder_is_visible:
-            self.text_finder.setText(self.last_find)
-        self.editor.finder = text_finder
-
-        return self.finder_is_visible
-
-    def save_finder_state(self, last_find, finder_visibility):
-        """Save last finder/search text input and finder visibility."""
-        if last_find and finder_visibility:
-            self.last_find = last_find
-        self.finder_is_visible = finder_visibility
 
     def refresh_table(self):
         """Refresh variable table."""
-        self.shellwidget.refresh_namespacebrowser()
+        self.refresh_namespacebrowser()
         try:
             self.editor.resizeRowToContents()
         except TypeError:
             pass
 
+    def refresh_namespacebrowser(self, *, interrupt=True):
+        """Refresh namespace browser"""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
+        self.shellwidget.call_kernel(
+            interrupt=interrupt,
+            callback=self.process_remote_view
+        ).get_namespace_view()
+
+        self.shellwidget.call_kernel(
+            interrupt=interrupt,
+            callback=self.set_var_properties
+        ).get_var_properties()
+
+    def set_namespace_view_settings(self, interrupt=True):
+        """Set the namespace view settings"""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
+        settings = self.get_view_settings()
+        self.shellwidget.call_kernel(
+            interrupt=interrupt
+        ).set_namespace_view_settings(settings)
+
+    def setup_kernel(self):
+        self.set_namespace_view_settings(interrupt=False)
+        self.refresh_namespacebrowser(interrupt=False)
+
     def process_remote_view(self, remote_view):
         """Process remote view"""
-        # To load all variables when a new filtering search is
-        # started.
-        self.text_finder.load_all = False
-
         if remote_view is not None:
             self.set_data(remote_view)
 
@@ -181,15 +226,15 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
             self.filename = str(filename)
             if os.name == "nt":
                 self.filename = remove_backslashes(self.filename)
-            ext = osp.splitext(self.filename)[1].lower()
+            extension = osp.splitext(self.filename)[1].lower()
 
-            if ext not in iofunctions.load_funcs:
+            if extension not in iofunctions.load_funcs:
                 buttons = QMessageBox.Yes | QMessageBox.Cancel
                 answer = QMessageBox.question(self, title,
                             _("<b>Unsupported file extension '%s'</b><br><br>"
                               "Would you like to import it anyway "
                               "(by selecting a known file format)?"
-                              ) % ext, buttons)
+                              ) % extension, buttons)
                 if answer == QMessageBox.Cancel:
                     return
                 formats = list(iofunctions.load_extensions.keys())
@@ -197,11 +242,11 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
                                                 _('Open file as:'),
                                                 formats, 0, False)
                 if ok:
-                    ext = iofunctions.load_extensions[str(item)]
+                    extension = iofunctions.load_extensions[str(item)]
                 else:
                     return
 
-            load_func = iofunctions.load_funcs[ext]
+            load_func = iofunctions.load_funcs[extension]
                 
             # 'import_wizard' (self.setup_io)
             if isinstance(load_func, str):
@@ -220,7 +265,7 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
             else:
                 QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
                 QApplication.processEvents()
-                error_message = self.shellwidget.load_data(self.filename, ext)
+                error_message = self.load_data(self.filename, extension)
                 QApplication.restoreOverrideCursor()
                 QApplication.processEvents()
     
@@ -232,6 +277,47 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
                                        ) % (self.filename, error_message))
             self.refresh_table()
 
+    def load_data(self, filename, ext):
+        """Load data from a file."""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
+        overwrite = False
+        if self.editor.var_properties:
+            message = _('Do you want to overwrite old '
+                        'variables (if any) in the namespace '
+                        'when loading the data?')
+            buttons = QMessageBox.Yes | QMessageBox.No
+            result = QMessageBox.question(
+                self, _('Data loading'), message, buttons)
+            overwrite = result == QMessageBox.Yes
+        try:
+            return self.shellwidget.call_kernel(
+                blocking=True,
+                display_error=True,
+                timeout=CALL_KERNEL_TIMEOUT).load_data(
+                    filename, ext, overwrite=overwrite)
+        except ImportError as msg:
+            module = str(msg).split("'")[1]
+            msg = _("Spyder is unable to open the file "
+                    "you're trying to load because <tt>{module}</tt> is "
+                    "not installed. Please install "
+                    "this package in your working environment."
+                    "<br>").format(module=module)
+            return msg
+        except TimeoutError:
+            msg = _("Data is too big to be loaded")
+            return msg
+        except tarfile.ReadError:
+            # Fixes spyder-ide/spyder#19126
+            msg = _("The file could not be opened successfully. Recall that "
+                    "the Variable Explorer supports the following file "
+                    "extensions to import data:"
+                    "<br><br><tt>{extensions}</tt>").format(
+                        extensions=', '.join(IMPORT_EXT))
+            return msg
+        except (UnpicklingError, RuntimeError, CommError):
+            return None
+
     def reset_namespace(self):
         warning = self.get_conf(
             section='ipython_console',
@@ -240,24 +326,30 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
         self.shellwidget.reset_namespace(warning=warning, message=True)
         self.editor.automatic_column_width = True
 
-    def save_data(self, filename=None):
+    def save_data(self):
         """Save data"""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
+        filename = self.filename
         if filename is None:
-            filename = self.filename
-            if filename is None:
-                filename = getcwd_or_home()
-            filename, _selfilter = getsavefilename(self, _("Save data"),
-                                                   filename,
-                                                   iofunctions.save_filters)
-            if filename:
-                self.filename = filename
-            else:
-                return False
+            filename = getcwd_or_home()
+        extension = osp.splitext(filename)[1].lower()
+        if not extension:
+            # Needed to prevent trying to save a data file without extension
+            # See spyder-ide/spyder#7196
+            filename = filename + '.spydata'
+        filename, _selfilter = getsavefilename(self, _("Save data"),
+                                               filename,
+                                               iofunctions.save_filters)
+        if filename:
+            self.filename = filename
+        else:
+            return False
 
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         QApplication.processEvents()
 
-        error_message = self.shellwidget.save_namespace(self.filename)
+        error_message = self.save_namespace(self.filename)
 
         QApplication.restoreOverrideCursor()
         QApplication.processEvents()
@@ -275,42 +367,14 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
 
             QMessageBox.critical(self, _("Save data"), save_data_message)
 
-
-class NamespacesBrowserFinder(FinderLineEdit):
-    """Textbox for filtering listed variables in the table."""
-    # To load all variables when filtering.
-    load_all = False
-
-    def update_parent(self, parent, callback=None, main=None):
-        self._parent = parent
-        self.main = main
+    def save_namespace(self, filename):
         try:
-            self.textChanged.disconnect()
-        except TypeError:
-            pass
-        if callback:
-            self.textChanged.connect(callback)
-
-    def load_all_variables(self):
-        """Load all variables to correctly filter them."""
-        if not self.load_all:
-            self._parent.parent().editor.source_model.load_all()
-        self.load_all = True
-
-    def keyPressEvent(self, event):
-        """Qt and FilterLineEdit Override."""
-        key = event.key()
-        if key in [Qt.Key_Up]:
-            self.load_all_variables()
-            self._parent.previous_row()
-        elif key in [Qt.Key_Down]:
-            self.load_all_variables()
-            self._parent.next_row()
-        elif key in [Qt.Key_Escape]:
-            self.main.sig_hide_finder_requested.emit()
-        elif key in [Qt.Key_Enter, Qt.Key_Return]:
-            # TODO: Check if an editor needs to be shown
-            pass
-        else:
-            self.load_all_variables()
-            super(NamespacesBrowserFinder, self).keyPressEvent(event)
+            return self.shellwidget.call_kernel(
+                blocking=True,
+                display_error=True,
+                timeout=CALL_KERNEL_TIMEOUT).save_namespace(filename)
+        except TimeoutError:
+            msg = _("Data is too big to be saved")
+            return msg
+        except (UnpicklingError, RuntimeError, CommError):
+            return None

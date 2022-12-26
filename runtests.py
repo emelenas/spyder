@@ -33,11 +33,11 @@ def run_pytest(run_slow=False, extra_args=None):
     """Run pytest tests for Spyder."""
     # Be sure to ignore subrepos
     pytest_args = ['-vv', '-rw', '--durations=10', '--ignore=./external-deps',
-                   '-W ignore::UserWarning']
+                   '-W ignore::UserWarning', '--timeout=120']
 
     if CI:
-        # Exit on first failure and show coverage
-        pytest_args += ['-x', '--cov=spyder', '--no-cov-on-fail']
+        # Show coverage
+        pytest_args += ['--cov=spyder', '--no-cov-on-fail']
 
         # To display nice tests resume in Azure's web page
         if os.environ.get('AZURE', None) is not None:

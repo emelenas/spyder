@@ -21,8 +21,8 @@ from typing import Optional
 from qtpy import PYQT5
 from qtpy.QtCore import QByteArray, QSize, Qt, Signal, Slot
 from qtpy.QtGui import QIcon
-from qtpy.QtWidgets import (QHBoxLayout, QSizePolicy, QToolButton, QVBoxLayout,
-                            QWidget)
+from qtpy.QtWidgets import (QApplication, QHBoxLayout, QSizePolicy,
+                            QToolButton, QVBoxLayout, QWidget)
 
 # Local imports
 from spyder.api.exceptions import SpyderAPIError
@@ -33,14 +33,13 @@ from spyder.api.widgets.menus import (MainWidgetMenu, OptionsMenuSections,
                                       PluginMainWidgetMenus)
 from spyder.api.widgets.mixins import SpyderToolbarMixin, SpyderWidgetMixin
 from spyder.api.widgets.toolbars import MainWidgetToolbar
-from spyder.config.manager import CONF
 from spyder.py3compat import qbytearray_to_str
 from spyder.utils.qthelpers import create_waitspinner, set_menu_icons
 from spyder.utils.registries import (
     ACTION_REGISTRY, TOOLBAR_REGISTRY, MENU_REGISTRY)
 from spyder.utils.stylesheet import (
     APP_STYLESHEET, PANES_TABBAR_STYLESHEET, PANES_TOOLBAR_STYLESHEET)
-from spyder.widgets.dock import SpyderDockWidget
+from spyder.widgets.dock import DockTitleBar, SpyderDockWidget
 from spyder.widgets.tabs import Tabs
 
 # Localization
@@ -61,6 +60,7 @@ class PluginMainWidgetActions:
     ClosePane = 'close_pane'
     DockPane = 'dock_pane'
     UndockPane = 'undock_pane'
+    LockUnlockPosition = 'lock_unlock_position'
 
 
 class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
@@ -83,8 +83,8 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
     stacked vertically and cannot be placed horizontally next to each other.
     """
 
-    # --- Attributes
-    # ------------------------------------------------------------------------
+    # ---- Attributes
+    # -------------------------------------------------------------------------
     ENABLE_SPINNER = False
     """
     This attribute enables/disables showing a spinner on the top right to the
@@ -114,8 +114,8 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
     the plugin, then this attribute should have a `None` value.
     """
 
-    # --- Signals
-    # ------------------------------------------------------------------------
+    # ---- Signals
+    # -------------------------------------------------------------------------
     sig_free_memory_requested = Signal()
     """
     This signal can be emitted to request the main application to garbage
@@ -174,7 +174,7 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
 
     sig_toggle_view_changed = Signal(bool)
     """
-    This action is emitted to inform the visibility of a dockable plugin
+    This signal is emitted to inform the visibility of a dockable plugin
     has changed.
 
     This is triggered by checking/unchecking the entry for a pane in the
@@ -192,14 +192,23 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
     needs its ancestor to be updated.
     """
 
-    def __init__(self, name, plugin, parent=None, configuration=CONF):
+    sig_unmaximize_plugin_requested = Signal((), (object,))
+    """
+    This signal is emitted to inform the main window that it needs to
+    unmaximize the currently maximized plugin, if any.
+
+    Parameters
+    ----------
+    plugin_instance: SpyderDockablePlugin
+        Unmaximize plugin only if it is not `plugin_instance`.
+    """
+
+    def __init__(self, name, plugin, parent=None):
         if PYQT5:
-            super().__init__(parent=parent, class_parent=plugin,
-                             configuration=configuration)
+            super().__init__(parent=parent, class_parent=plugin)
         else:
             QWidget.__init__(self, parent)
-            SpyderWidgetMixin.__init__(self, class_parent=plugin,
-                                       configuration=configuration)
+            SpyderWidgetMixin.__init__(self, class_parent=plugin)
 
         # Attributes
         # --------------------------------------------------------------------
@@ -208,12 +217,12 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         self._plugin = plugin
         self._parent = parent
         self._default_margins = None
-        self.is_maximized = None
         self.is_visible = None
         self.dock_action = None
         self.undock_action = None
         self.close_action = None
         self._toolbars_already_rendered = False
+        self._is_maximized = False
 
         # Attribute used to access the action, toolbar, toolbutton and menu
         # registries
@@ -293,8 +302,8 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         self._toolbars_layout.addLayout(self._main_toolbar_layout)
         self._main_layout.addLayout(self._toolbars_layout, stretch=1)
 
-    # --- Private Methods
-    # ------------------------------------------------------------------------
+    # ---- Private Methods
+    # -------------------------------------------------------------------------
     def _setup(self):
         """
         Setup default actions, create options menu, and connect signals.
@@ -341,6 +350,13 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
             icon=self.create_icon('dock'),
             triggered=self.close_window,
         )
+        self.lock_unlock_action = self.create_action(
+            name=PluginMainWidgetActions.LockUnlockPosition,
+            text=_("Unlock position"),
+            tip=_("Unlock to move pane to another position"),
+            icon=self.create_icon('drag_dock_widget'),
+            triggered=self.lock_unlock_position,
+        )
         self.undock_action = self.create_action(
             name=PluginMainWidgetActions.UndockPane,
             text=_("Undock"),
@@ -364,12 +380,12 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
             shortcut_context='_',
         )
 
-        bottom_section = OptionsMenuSections.Bottom
-        for item in [self.undock_action, self.close_action, self.dock_action]:
+        for item in [self.lock_unlock_action, self.undock_action,
+                     self.close_action, self.dock_action]:
             self.add_item_to_menu(
                 item,
                 self._options_menu,
-                section=bottom_section,
+                section=OptionsMenuSections.Bottom,
             )
 
         self._options_button.setMenu(self._options_menu)
@@ -400,6 +416,7 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         show_dock_actions = self.windowwidget is None
         self.undock_action.setVisible(show_dock_actions)
         self.close_action.setVisible(show_dock_actions)
+        self.lock_unlock_action.setVisible(show_dock_actions)
         self.dock_action.setVisible(not show_dock_actions)
 
         if sys.platform == 'darwin':
@@ -421,8 +438,33 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         """
         self.undock_action.setDisabled(top_level)
 
-    # --- Public Qt overriden methods
-    # ------------------------------------------------------------------------
+        # Change the cursor shape when dragging
+        if top_level:
+            QApplication.setOverrideCursor(Qt.ClosedHandCursor)
+        else:
+            QApplication.restoreOverrideCursor()
+
+    @Slot(bool)
+    def _on_title_bar_shown(self, visible):
+        """
+        Actions to perform when the title bar is shown/hidden.
+        """
+        if visible:
+            self.lock_unlock_action.setText(_('Lock position'))
+            self.lock_unlock_action.setIcon(self.create_icon('lock_open'))
+            for method_name in ['setToolTip', 'setStatusTip']:
+                method = getattr(self.lock_unlock_action, method_name)
+                method(_("Lock pane to the current position"))
+        else:
+            self.lock_unlock_action.setText(_('Unlock position'))
+            self.lock_unlock_action.setIcon(
+                self.create_icon('drag_dock_widget'))
+            for method_name in ['setToolTip', 'setStatusTip']:
+                method = getattr(self.lock_unlock_action, method_name)
+                method(_("Unlock to move pane to another position"))
+
+    # ---- Public Qt overriden methods
+    # -------------------------------------------------------------------------
     def setLayout(self, layout):
         """
         Set layout of the main widget of this plugin.
@@ -436,8 +478,8 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         self.on_close()
         super().closeEvent(event)
 
-    # --- Public methods to use
-    # ------------------------------------------------------------------------
+    # ---- Public methods to use
+    # -------------------------------------------------------------------------
     def get_plugin(self):
         """
         Return the parent plugin.
@@ -704,8 +746,8 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
 
             # self._toolbars_already_rendered = True
 
-    # --- SpyderDockwidget handling ------------------------------------------
-    # ------------------------------------------------------------------------
+    # ---- SpyderDockwidget handling ------------------------------------------
+    # -------------------------------------------------------------------------
     @Slot()
     def create_window(self):
         """
@@ -746,9 +788,18 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         window.show()
 
     @Slot()
-    def close_window(self):
+    def close_window(self, save_undocked=False):
         """
         Close QMainWindow instance that contains this widget.
+
+        Parameters
+        ----------
+        save_undocked : bool, optional
+            True if the undocked state needs to be saved. The default is False.
+
+        Returns
+        -------
+        None.
         """
         logger.debug("Docking plugin back to the main window")
 
@@ -757,6 +808,10 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
             # again.
             geometry = self.windowwidget.saveGeometry()
             self.set_conf('window_geometry', qbytearray_to_str(geometry))
+
+            # Save undocking state if requested
+            if save_undocked:
+                self.set_conf('undocked_on_window_close', True)
 
             # Fixes spyder-ide/spyder#10704
             self.__unsafe_window = self.windowwidget
@@ -770,10 +825,14 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
 
             if self.dockwidget is not None:
                 self.sig_update_ancestor_requested.emit()
+                self.get_plugin().switch_to_plugin()
                 self.dockwidget.setWidget(self)
                 self.dockwidget.setVisible(True)
                 self.dockwidget.raise_()
                 self._update_actions()
+        else:
+            # Reset undocked state
+            self.set_conf('undocked_on_window_close', False)
 
     def change_visibility(self, enable, force_focus=None):
         """Dock widget visibility has changed."""
@@ -826,6 +885,10 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         if not self.dockwidget:
             return
 
+        # Dock plugin if it's undocked before hiding it.
+        if self.windowwidget is not None:
+            self.close_window(save_undocked=True)
+
         if checked:
             self.dockwidget.show()
             self.dockwidget.raise_()
@@ -857,6 +920,7 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         # Signals
         dock.visibilityChanged.connect(self.change_visibility)
         dock.topLevelChanged.connect(self._on_top_level_change)
+        dock.sig_title_bar_shown.connect(self._on_title_bar_shown)
 
         return (dock, dock.LOCATION)
 
@@ -866,6 +930,33 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         Close the dockwidget.
         """
         self.toggle_view(False)
+
+    def lock_unlock_position(self):
+        """
+        Show/hide title bar to move/lock position.
+        """
+        if isinstance(self.dockwidget.titleBarWidget(), DockTitleBar):
+            self.dockwidget.remove_title_bar()
+        else:
+            self.dockwidget.set_title_bar()
+
+    def get_maximized_state(self):
+        """Get dockwidget's maximized state."""
+        return self._is_maximized
+
+    def set_maximized_state(self, state):
+        """
+        Set internal attribute that holds dockwidget's maximized state.
+
+        Parameters
+        ----------
+        state: bool
+            True if the plugin is maximized, False otherwise.
+        """
+        self._is_maximized = state
+
+        # This is necessary for old API plugins interacting with new ones.
+        self._plugin._ismaximized = state
 
     # --- API: methods to define or override
     # ------------------------------------------------------------------------
@@ -905,6 +996,7 @@ class PluginMainWidget(QWidget, SpyderWidgetMixin, SpyderToolbarMixin):
         This method **must** only operate on local attributes.
         """
         pass
+
 
 def run_test():
     # Third party imports

@@ -32,8 +32,6 @@ class ShellConnectMixin:
         ipyconsole.sig_shellwidget_changed.connect(self.set_shellwidget)
         ipyconsole.sig_shellwidget_created.connect(self.add_shellwidget)
         ipyconsole.sig_shellwidget_deleted.connect(self.remove_shellwidget)
-        ipyconsole.sig_external_spyder_kernel_connected.connect(
-            self.on_connection_to_external_spyder_kernel)
 
     @on_plugin_teardown(plugin=Plugins.IPythonConsole)
     def on_ipython_console_teardown(self):
@@ -43,8 +41,6 @@ class ShellConnectMixin:
         ipyconsole.sig_shellwidget_changed.disconnect(self.set_shellwidget)
         ipyconsole.sig_shellwidget_created.disconnect(self.add_shellwidget)
         ipyconsole.sig_shellwidget_deleted.disconnect(self.remove_shellwidget)
-        ipyconsole.sig_external_spyder_kernel_connected.disconnect(
-            self.on_connection_to_external_spyder_kernel)
 
     # ---- Public API
     # -------------------------------------------------------------------------
@@ -84,15 +80,29 @@ class ShellConnectMixin:
         """
         self.get_widget().remove_shellwidget(shellwidget)
 
-    def on_connection_to_external_spyder_kernel(self, shellwidget):
+    def current_widget(self):
         """
-        Actions to take when the IPython console connects to an
-        external Spyder kernel.
+        Return the current widget displayed at the moment.
+
+        Returns
+        -------
+        current_widget: QWidget
+            The widget displayed in the current tab.
+        """
+        return self.get_widget().current_widget()
+
+    def get_widget_for_shellwidget(self, shellwidget):
+        """
+        Return the widget registered with the given shellwidget.
 
         Parameters
         ----------
         shellwidget: spyder.plugins.ipyconsole.widgets.shell.ShellWidget
-            The shell widget that was connected to the external Spyder
-            kernel.
+            The shell widget.
+
+        Returns
+        -------
+        current_widget: QWidget
+            The widget corresponding to the shellwidget, or None if not found.
         """
-        pass
+        return self.get_widget().get_widget_for_shellwidget(shellwidget)

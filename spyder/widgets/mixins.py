@@ -19,8 +19,10 @@ import re
 import sre_constants
 import sys
 import textwrap
+from pkg_resources import parse_version
 
 # Third party imports
+from qtpy import QT_VERSION
 from qtpy.QtCore import QPoint, QRegularExpression, Qt
 from qtpy.QtGui import QCursor, QTextCursor, QTextDocument
 from qtpy.QtWidgets import QApplication
@@ -463,7 +465,7 @@ class BaseEditMixin(object):
         language = getattr(self, 'language', language).lower()
         signature_or_text = signature_or_text.replace('\\*', '*')
 
-        # Remove special symbols that could itefere with ''.format
+        # Remove special symbols that could interfere with ''.format
         signature_or_text = signature_or_text.replace('{', '&#123;')
         signature_or_text = signature_or_text.replace('}', '&#125;')
 
@@ -519,6 +521,8 @@ class BaseEditMixin(object):
             else:
                 signature = '\n'.join(lines[:i])
                 extra_text = '\n'.join(lines[i:])
+                if extra_text == '\n':
+                    extra_text = None
 
             if signature:
                 new_signature = self._format_signature(
@@ -711,7 +715,6 @@ class BaseEditMixin(object):
             self.document().setModified(True)
             if self.sig_eol_chars_changed is not None:
                 self.sig_eol_chars_changed.emit(eol_chars)
-            self.document_did_change(text)
 
     def get_line_separator(self):
         """Return line separator based on current EOL mode"""
@@ -876,7 +879,6 @@ class BaseEditMixin(object):
         """
         self.__move_cursor_anchor(what, direction, QTextCursor.MoveAnchor)
 
-
     #------Selection
     def extend_selection_to_next(self, what='word', direction='left'):
         """
@@ -885,9 +887,10 @@ class BaseEditMixin(object):
         """
         self.__move_cursor_anchor(what, direction, QTextCursor.KeepAnchor)
 
-
     #------Text: get, set, ...
-    def __select_text(self, position_from, position_to):
+
+    def _select_text(self, position_from, position_to):
+        """Select text and return cursor."""
         position_from = self.get_position(position_from)
         position_to = self.get_position(position_to)
         cursor = self.textCursor()
@@ -930,7 +933,7 @@ class BaseEditMixin(object):
         TODO: Evaluate if this is still a problem and if the workaround can
               be moved closer to where the problem occurs.
         """
-        cursor = self.__select_text(position_from, position_to)
+        cursor = self._select_text(position_from, position_to)
         text = to_text_string(cursor.selectedText())
         if remove_newlines:
             remove_newlines = position_from != 'sof' or position_to != 'eof'
@@ -960,10 +963,9 @@ class BaseEditMixin(object):
             self.textCursor().insertText(text)
             if self.sig_text_was_inserted is not None:
                 self.sig_text_was_inserted.emit()
-            self.document_did_change()
 
     def replace_text(self, position_from, position_to, text):
-        cursor = self.__select_text(position_from, position_to)
+        cursor = self._select_text(position_from, position_to)
         if self.sig_will_remove_selection is not None:
             start, end = self.get_selection_start_end(cursor)
             self.sig_will_remove_selection.emit(start, end)
@@ -973,15 +975,13 @@ class BaseEditMixin(object):
         cursor.insertText(text)
         if self.sig_text_was_inserted is not None:
             self.sig_text_was_inserted.emit()
-        self.document_did_change()
 
     def remove_text(self, position_from, position_to):
-        cursor = self.__select_text(position_from, position_to)
+        cursor = self._select_text(position_from, position_to)
         if self.sig_will_remove_selection is not None:
             start, end = self.get_selection_start_end(cursor)
             self.sig_will_remove_selection.emit(start, end)
         cursor.removeSelectedText()
-        self.document_did_change()
 
     def get_current_object(self):
         """
@@ -1083,7 +1083,7 @@ class BaseEditMixin(object):
         startpos = cursor.selectionStart()
 
         # Find a valid Python variable name
-        if valid_python_variable:
+        if valid_python_variable and not completion:
             match = re.findall(r'([^\d\W]\w*)', text, re.UNICODE)
             if not match:
                 # This is assumed in several places of our codebase,
@@ -1198,12 +1198,14 @@ class BaseEditMixin(object):
         """Delete selected text."""
         self.textCursor().removeSelectedText()
         # The next three lines are a workaround for a quirk of
-        # QTextEdit. See spyder-ide/spyder#12663 and
+        # QTextEdit on Linux with Qt < 5.15, MacOs and Windows.
+        # See spyder-ide/spyder#12663 and
         # https://bugreports.qt.io/browse/QTBUG-35861
-        cursor = self.textCursor()
-        cursor.setPosition(cursor.position())
-        self.setTextCursor(cursor)
-        self.document_did_change()
+        if (parse_version(QT_VERSION) < parse_version('5.15')
+                or os.name == 'nt' or sys.platform == 'darwin'):
+            cursor = self.textCursor()
+            cursor.setPosition(cursor.position())
+            self.setTextCursor(cursor)
 
     def replace(self, text, pattern=None):
         """Replace selected text by *text*.
@@ -1227,7 +1229,6 @@ class BaseEditMixin(object):
         if self.sig_text_was_inserted is not None:
             self.sig_text_was_inserted.emit()
         cursor.endEditBlock()
-        self.document_did_change()
 
 
     #------Find/replace
@@ -1412,7 +1413,6 @@ class BaseEditMixin(object):
                 if self.sig_text_was_inserted is not None:
                     self.sig_text_was_inserted.emit()
                 cursor.endEditBlock()
-                self.document_did_change()
 
 
 class TracebackLinksMixin(object):

@@ -10,12 +10,14 @@ rope
 yapf
 
 # Scientific packages (for Same as Spyder)
-numpy
+numpy<1.23
 scipy
 pandas
+openpyxl  # pandas optional dependency to handle Excel files
+defusedxml  # openpyxl dependency to prevent security issues
 matplotlib
 cython
 sympy
 
 # Spyder external plugins
-spyder-terminal>=1.2.1
+spyder-terminal>=1.2.2

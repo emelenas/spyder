@@ -51,8 +51,7 @@ class VariableExplorer(SpyderDockablePlugin, ShellConnectMixin):
         return self.create_icon('dictedit')
 
     def on_initialize(self):
-        self.get_widget().sig_free_memory_requested.connect(
-            self.sig_free_memory_requested)
+        pass
 
     @on_plugin_available(plugin=Plugins.Preferences)
     def on_preferences_available(self):
@@ -63,20 +62,3 @@ class VariableExplorer(SpyderDockablePlugin, ShellConnectMixin):
     def on_preferences_teardown(self):
         preferences = self.get_plugin(Plugins.Preferences)
         preferences.deregister_plugin_preferences(self)
-
-    # ---- Public API
-    # ------------------------------------------------------------------------
-    def current_widget(self):
-        """
-        Return the current widget displayed at the moment.
-
-        Returns
-        -------
-        spyder.plugins.plots.widgets.namespacebrowser.NamespaceBrowser
-        """
-        return self.get_widget().current_widget()
-
-    def on_connection_to_external_spyder_kernel(self, shellwidget):
-        """Send namespace view settings to the kernel."""
-        shellwidget.set_namespace_view_settings()
-        shellwidget.refresh_namespacebrowser()

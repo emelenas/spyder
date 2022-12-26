@@ -9,6 +9,8 @@
 Testing utilities to be used with pytest.
 """
 
+# Standard library imports
+import sys
 import types
 from unittest.mock import Mock, MagicMock
 
@@ -20,6 +22,7 @@ import pytest
 # Local imports
 from spyder.api.plugins import Plugins
 from spyder.api.plugin_registration.registry import PLUGIN_REGISTRY
+from spyder.app.cli_options import get_options
 from spyder.config.manager import CONF
 from spyder.plugins.preferences.plugin import Preferences
 from spyder.utils.icon_manager import ima
@@ -38,6 +41,10 @@ class MainWindowMock(QMainWindow):
         self._APPLICATION_TOOLBARS = MagicMock()
 
         self.console = Mock()
+
+        # To provide command line options for plugins that need them
+        sys_argv = [sys.argv[0]]  # Avoid options passed to pytest
+        self._cli_options = get_options(sys_argv)[0]
 
         PLUGIN_REGISTRY.reset()
         PLUGIN_REGISTRY.sig_plugin_ready.connect(self.register_plugin)
@@ -58,14 +65,11 @@ class MainWindowMock(QMainWindow):
         plugin = PLUGIN_REGISTRY.get_plugin(plugin_name)
         plugin._register(omit_conf=True)
 
-    def get_plugin(self, plugin_name):
+    def get_plugin(self, plugin_name, error=True):
         if plugin_name in PLUGIN_REGISTRY:
             return PLUGIN_REGISTRY.get_plugin(plugin_name)
 
     def set_prefs_size(self, size):
-        pass
-
-    def reset_spyder(self):
         pass
 
 
@@ -80,14 +84,11 @@ class ConfigDialogTester(QWidget):
         def set_prefs_size(self, size):
             pass
 
-        def reset_spyder(self):
-            pass
-
         def register_plugin(self, plugin_name, external=False):
             plugin = PLUGIN_REGISTRY.get_plugin(plugin_name)
             plugin._register()
 
-        def get_plugin(self, plugin_name, error=False):
+        def get_plugin(self, plugin_name, error=True):
             if plugin_name in PLUGIN_REGISTRY:
                 return PLUGIN_REGISTRY.get_plugin(plugin_name)
             return None
@@ -96,8 +97,6 @@ class ConfigDialogTester(QWidget):
                 types.MethodType(register_plugin, self._main))
         setattr(self._main, 'get_plugin',
                 types.MethodType(get_plugin, self._main))
-        setattr(self._main, 'reset_spyder',
-                types.MethodType(reset_spyder, self._main))
         setattr(self._main, 'set_prefs_size',
                 types.MethodType(set_prefs_size, self._main))
 

@@ -8,6 +8,7 @@
 import ast
 import os
 import re
+import sys
 import sysconfig
 
 
@@ -113,13 +114,27 @@ def capture_last_Expr(code_ast, out_varname):
         # Fix line number and column offset
         assign_node.lineno = expr_node.lineno
         assign_node.col_offset = expr_node.col_offset
+        if sys.version_info[:2] >= (3, 8):
+            # Exists from 3.8, necessary from 3.11
+            assign_node.end_lineno = expr_node.end_lineno
+            if assign_node.lineno == assign_node.end_lineno:
+                # Add 'globals()[{}] = ' and remove 'None'
+                assign_node.end_col_offset += expr_node.end_col_offset - 4
+            else:
+                assign_node.end_col_offset = expr_node.end_col_offset
         code_ast.body[-1] = assign_node
     return code_ast, capture_last_expression
 
 
-def normalise_filename(filename):
-    """Normalise path for window."""
-    # Recursive
-    if os.name == 'nt':
-        return filename.replace('\\', '/')
-    return filename
+def canonic(filename):
+    """
+    Return canonical form of filename.
+
+    This is a copy of bdb.canonic, so that the debugger will process 
+    filenames in the same way
+    """
+    if filename == "<" + filename[1:-1] + ">":
+        return filename
+    canonic = os.path.abspath(filename)
+    canonic = os.path.normcase(canonic)
+    return canonic

@@ -18,6 +18,7 @@ import logging
 import os
 from pkg_resources import parse_version, iter_entry_points
 from typing import List, Union
+import weakref
 
 # Third-party imports
 from qtpy.QtCore import QMutex, QMutexLocker, QTimer, Slot, Signal
@@ -70,7 +71,7 @@ class CompletionPlugin(SpyderPluginV2):
     NAME = 'completions'
     CONF_SECTION = 'completions'
     REQUIRES = [Plugins.Preferences, Plugins.MainInterpreter]
-    OPTIONAL = [Plugins.Application, Plugins.StatusBar, Plugins.MainMenu]
+    OPTIONAL = [Plugins.MainMenu, Plugins.PythonpathManager, Plugins.StatusBar]
 
     CONF_FILE = False
 
@@ -257,7 +258,7 @@ class CompletionPlugin(SpyderPluginV2):
             CompletionConfigPage, providers=conf_providers)
         self.ADDITIONAL_CONF_TABS = {'completions': conf_tabs}
 
-    # ---------------- Public Spyder API required methods ---------------------
+    # ---- SpyderPluginV2 API
     @staticmethod
     def get_name() -> str:
         return _('Completion and linting')
@@ -272,10 +273,6 @@ class CompletionPlugin(SpyderPluginV2):
 
     def on_initialize(self):
         self.sig_interpreter_changed.connect(self.update_completion_status)
-
-        if self.main:
-            self.main.sig_pythonpath_changed.connect(
-                self.sig_pythonpath_changed)
 
         # Do not start providers on tests unless necessary
         if running_under_pytest():
@@ -313,12 +310,6 @@ class CompletionPlugin(SpyderPluginV2):
             self.statusbar.add_status_widget(sb)
         self.statusbar.add_status_widget(self.completion_status)
 
-    @on_plugin_available(plugin=Plugins.Application)
-    def on_application_available(self):
-        application = self.get_plugin(Plugins.Application)
-        self.sig_restart_requested.connect(
-            application.sig_restart_requested)
-
     @on_plugin_available(plugin=Plugins.MainMenu)
     def on_mainmenu_available(self):
         main_menu = self.get_plugin(Plugins.MainMenu)
@@ -330,6 +321,12 @@ class CompletionPlugin(SpyderPluginV2):
         # Add items to application menus.
         for args, kwargs in self.items_to_add_to_application_menus:
             main_menu.add_item_to_application_menu(*args, **kwargs)
+
+    @on_plugin_available(plugin=Plugins.PythonpathManager)
+    def on_pythonpath_manager_available(self):
+        pythonpath_manager = self.get_plugin(Plugins.PythonpathManager)
+        pythonpath_manager.sig_pythonpath_changed.connect(
+            self.sig_pythonpath_changed)
 
     @on_plugin_teardown(plugin=Plugins.Preferences)
     def on_preferences_teardown(self):
@@ -375,6 +372,13 @@ class CompletionPlugin(SpyderPluginV2):
                 main_menu.remove_item_from_application_menu(
                     item_id, menu_id=menu_id)
 
+    @on_plugin_teardown(plugin=Plugins.PythonpathManager)
+    def on_pythonpath_manager_teardown(self):
+        pythonpath_manager = self.get_plugin(Plugins.PythonpathManager)
+        pythonpath_manager.sig_pythonpath_changed.disconnect(
+            self.sig_pythonpath_changed)
+
+    # ---- Public API
     def stop_all_providers(self):
         """Stop all running completion providers."""
         for provider_name in self.providers:
@@ -520,7 +524,7 @@ class CompletionPlugin(SpyderPluginV2):
         tool_tip = mi_status._interpreter
 
         if '(' in value:
-            value, _ = value.split('(')
+            value = value.split('(')[0]
 
         if ':' in value:
             kind, name = value.split(':')
@@ -1020,7 +1024,7 @@ class CompletionPlugin(SpyderPluginV2):
         self.requests[req_id] = {
             'language': language,
             'req_type': req_type,
-            'response_instance': req['response_instance'],
+            'response_instance': weakref.ref(req['response_instance']),
             'sources': {},
             'timed_out': False,
         }
@@ -1239,7 +1243,7 @@ class CompletionPlugin(SpyderPluginV2):
         """
         request_responses = self.requests[req_id]
         req_type = request_responses['req_type']
-        response_instance = id(request_responses['response_instance'])
+        response_instance = id(request_responses['response_instance']())
         do_send = True
 
         # This is necessary to prevent sending completions for old requests
@@ -1248,7 +1252,7 @@ class CompletionPlugin(SpyderPluginV2):
             max_req_id = max(
                 [key for key, item in self.requests.items()
                  if item['req_type'] == req_type
-                 and id(item['response_instance']) == response_instance]
+                 and id(item['response_instance']()) == response_instance]
                 or [-1])
             do_send = (req_id == max_req_id)
 
@@ -1266,7 +1270,7 @@ class CompletionPlugin(SpyderPluginV2):
         """
         req_type = request_responses['req_type']
         req_id_responses = request_responses['sources']
-        response_instance = request_responses['response_instance']
+        response_instance = request_responses['response_instance']()
         logger.debug('Gather responses for {0}'.format(req_type))
 
         if req_type == CompletionRequestTypes.DOCUMENT_COMPLETION:
@@ -1275,7 +1279,8 @@ class CompletionPlugin(SpyderPluginV2):
             responses = self.gather_responses(req_type, req_id_responses)
 
         try:
-            response_instance.handle_response(req_type, responses)
+            if response_instance:
+                response_instance.handle_response(req_type, responses)
         except RuntimeError:
             # This is triggered when a codeeditor instance has been
             # removed before the response can be processed.

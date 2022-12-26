@@ -24,22 +24,12 @@ def show_warning(message):
         root.title("Spyder")
         label = tk.Label(root, text=message, justify='left')
         label.pack(side="top", fill="both", expand=True, padx=20, pady=20)
-        button = tk.Button(root, text="OK", command=lambda: root.destroy())
+        button = tk.Button(root, text="OK", command=root.destroy)
         button.pack(side="bottom", fill="none", expand=True)
         root.mainloop()
     except Exception:
         pass
     raise RuntimeError(message)
-
-
-def check_path():
-    """Check sys.path: is Spyder properly installed?"""
-    dirname = osp.abspath(osp.join(osp.dirname(__file__), osp.pardir))
-    if dirname not in sys.path:
-        show_warning("Spyder must be installed properly "
-                     "(e.g. from source: 'python setup.py install'),\n"
-                     "or directory '%s' must be in PYTHONPATH "
-                     "environment variable." % dirname)
 
 
 def check_qt():

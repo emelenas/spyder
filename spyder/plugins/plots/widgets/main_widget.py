@@ -64,17 +64,6 @@ class PlotsWidget(ShellConnectMainWidget):
     sig_figure_loaded = Signal()
     """This signal is emitted when a figure is loaded succesfully"""
 
-    sig_redirect_stdio_requested = Signal(bool)
-    """
-    This signal is emitted to request the main application to redirect
-    standard output/error when using Open/Save/Browse dialogs within widgets.
-
-    Parameters
-    ----------
-    redirect: bool
-        Start redirect (True) or stop redirect (False).
-    """
-
     def __init__(self, name=None, plugin=None, parent=None):
         super().__init__(name, plugin, parent)
 
@@ -247,7 +236,8 @@ class PlotsWidget(ShellConnectMainWidget):
                                              self.undock_action,
                                              self.close_action,
                                              self.dock_action,
-                                             self.toggle_view_action]:
+                                             self.toggle_view_action,
+                                             self.lock_unlock_action]:
                     action.setEnabled(value)
 
                     # IMPORTANT: Since we are defining the main actions in here
@@ -263,7 +253,7 @@ class PlotsWidget(ShellConnectMainWidget):
 
                         if action not in thumbnails_sb_actions:
                             thumbnails_sb.addAction(action)
-            except RuntimeError:
+            except (RuntimeError, AttributeError):
                 pass
 
         self.zoom_disp.setEnabled(value)
@@ -306,7 +296,18 @@ class PlotsWidget(ShellConnectMainWidget):
         return fig_browser
 
     def close_widget(self, fig_browser):
+        fig_browser.sig_redirect_stdio_requested.disconnect(
+            self.sig_redirect_stdio_requested)
+
+        fig_browser.sig_figure_menu_requested.disconnect(
+            self.show_figure_menu)
+        fig_browser.sig_thumbnail_menu_requested.disconnect(
+            self.show_thumbnail_menu)
+        fig_browser.sig_figure_loaded.disconnect(self.update_actions)
+        fig_browser.sig_save_dir_changed.disconnect()
+        fig_browser.sig_zoom_changed.disconnect(self.zoom_disp.setValue)
         fig_browser.close()
+        fig_browser.setParent(None)
 
     def switch_widget(self, fig_browser, old_fig_browser):
         option_keys = [('auto_fit_plotting', True),

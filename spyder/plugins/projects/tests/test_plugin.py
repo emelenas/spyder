@@ -11,19 +11,23 @@ Tests for the Projects plugin.
 """
 
 # Standard library imports
+import configparser
 import os
-import shutil
 import os.path as osp
+import shutil
 import sys
-from unittest.mock import Mock, MagicMock
+from unittest.mock import MagicMock
 
 # Third party imports
 import pytest
 from flaky import flaky
 
 # Local imports
+from spyder.app.cli_options import get_options
+from spyder.config.base import running_in_ci
 from spyder.config.manager import CONF
 import spyder.plugins.base
+from spyder.plugins.projects.api import BaseProjectType
 from spyder.plugins.projects.plugin import Projects, QMessageBox
 from spyder.plugins.preferences.tests.conftest import MainWindowMock
 from spyder.plugins.projects.widgets.projectdialog import ProjectDialog
@@ -34,8 +38,9 @@ from spyder.py3compat import to_text_string
 # ---- Fixtures
 # =============================================================================
 @pytest.fixture
-def projects(qtbot, mocker):
+def projects(qtbot, mocker, request, tmpdir):
     """Projects plugin fixture."""
+    use_cli_project = request.node.get_closest_marker('use_cli_project')
 
     class EditorMock(MagicMock):
         def get_open_filenames(self):
@@ -44,6 +49,12 @@ def projects(qtbot, mocker):
             return []
 
     class MainWindowProjectsMock(MainWindowMock):
+        def __init__(self, parent):
+            # This avoids using the cli options passed to pytest
+            sys_argv = [sys.argv[0]]
+            self._cli_options = get_options(sys_argv)[0]
+            super().__init__(parent)
+
         def __getattr__(self, attr):
             if attr == 'ipyconsole':
                 return None
@@ -52,8 +63,16 @@ def projects(qtbot, mocker):
             except AttributeError:
                 return MagicMock()
 
+        def get_initial_working_directory(self):
+            return str(tmpdir)
+
     # Main window mock
     main_window = MainWindowProjectsMock(None)
+    if use_cli_project:
+        tmpdir.mkdir('cli_project_dir')
+
+        # This allows us to test relative paths passed on the command line
+        main_window._cli_options.project = 'cli_project_dir'
 
     # Create plugin
     projects = Projects(configuration=CONF)
@@ -281,8 +300,6 @@ def test_recent_projects_menu_action(projects, tmpdir):
 
     Regression test for spyder-ide/spyder#8450.
     """
-    recent_projects_len = len(projects.recent_projects)
-
     # Create the directories.
     path0 = to_text_string(tmpdir.mkdir('project0'))
     path1 = to_text_string(tmpdir.mkdir('project1'))
@@ -347,6 +364,7 @@ def test_project_explorer_tree_root(projects, tmpdir, qtbot):
 
 @flaky(max_runs=5)
 @pytest.mark.skipif(sys.platform == 'darwin', reason="Fails on Mac")
+@pytest.mark.skipif(not running_in_ci(), reason="Hangs locally sometimes")
 def test_filesystem_notifications(qtbot, projects, tmpdir):
     """
     Test that filesystem notifications are emitted when creating,
@@ -463,6 +481,83 @@ def test_loaded_and_closed_signals(create_projects, tmpdir, mocker, qtbot):
     with qtbot.waitSignals(
             [projects.sig_project_loaded, projects.sig_project_closed]):
         projects.open_project(path=path2)
+
+
+@pytest.mark.use_cli_project
+def test_project_cli(projects):
+    """Test that we can open a project from the command line."""
+    # Simulate opening a project when the main window is visible
+    projects.on_mainwindow_visible()
+
+    # Verify that we created the expected project
+    active_project = projects.get_active_project_path()
+    assert osp.split(active_project)[-1] == 'cli_project_dir'
+
+    # Close project
+    projects.close_project()
+
+
+def test_reopen_project(projects, tmpdir):
+    """Test that we can reopen a project from the last session."""
+    # Create project
+    last_project = tmpdir.mkdir('last_project_dir')
+    last_project.mkdir('.spyproject')
+    projects.set_conf('current_project_path', str(last_project))
+
+    # Simulate opening a project when the main window is visible
+    projects.on_mainwindow_visible()
+
+    # Verify that we created the expected project
+    active_project = projects.get_active_project_path()
+    assert osp.split(active_project)[-1] == 'last_project_dir'
+
+    # Close project
+    projects.close_project()
+
+
+def test_recreate_project_config(projects, tmpdir):
+    """
+    Test that the project's config files are recreated when there are errors
+    reading them.
+
+    Regression test for spyder-ide/spyder#17907.
+    """
+    # Create a new directory
+    path = str(tmpdir.mkdir('error_reading_config'))
+
+    # Open project in path to generate its config
+    projects.open_project(path=path)
+
+    # Get project's config path
+    config_path = projects.current_active_project.config._path
+
+    # Close project
+    projects.close_project()
+
+    # Append the contents of a config file to it in order to give an error
+    # while reading it
+    config_file = osp.join(config_path, 'workspace.ini')
+
+    with open(config_file, 'r') as f:
+        file_contents = f.readlines()
+
+    with open(config_file, 'a') as f:
+        for line in file_contents:
+            f.write(line)
+
+    # Try to read config and check we get an error
+    with pytest.raises(configparser.Error):
+        BaseProjectType.create_config(config_path)
+
+    # Reopen the project again and check we recreated the config file we
+    # changed
+    projects.open_project(path=path)
+    projects.close_project()
+
+    with open(config_file, 'r') as f:
+        new_file_contents = f.readlines()
+
+    assert file_contents == new_file_contents
 
 
 if __name__ == "__main__":

@@ -31,13 +31,14 @@ from qtpy.QtWidgets import (QApplication, QLabel, QMessageBox, QTreeWidget,
                             QTreeWidgetItem, QVBoxLayout)
 
 # Local imports
+from spyder.api.config.decorators import on_conf_change
 from spyder.api.translations import get_translation
 from spyder.api.widgets.main_widget import PluginMainWidget
 from spyder.api.widgets.mixins import SpyderWidgetMixin
-from spyder.config.base import get_conf_path
+from spyder.config.base import get_conf_path, running_in_mac_app
 from spyder.plugins.variableexplorer.widgets.texteditor import TextEditor
 from spyder.py3compat import to_text_string
-from spyder.utils.misc import add_pathlist_to_PYTHONPATH, getcwd_or_home
+from spyder.utils.misc import get_python_executable, getcwd_or_home
 from spyder.utils.palette import SpyderPalette, QStylePalette
 from spyder.utils.programs import shell_split
 from spyder.utils.qthelpers import get_item_user_text, set_item_user_text
@@ -53,6 +54,7 @@ logger = logging.getLogger(__name__)
 # --- Constants
 # ----------------------------------------------------------------------------
 MAIN_TEXT_COLOR = QStylePalette.COLOR_TEXT_1
+
 
 class ProfilerWidgetActions:
     # Triggers
@@ -86,6 +88,7 @@ class ProfilerWidgetInformationToolbarItems:
     Stretcher1 = 'stretcher_1'
     Stretcher2 = 'stretcher_2'
     DateLabel = 'date_label'
+
 
 # --- Utils
 # ----------------------------------------------------------------------------
@@ -148,17 +151,6 @@ class ProfilerWidget(PluginMainWidget):
         Word to select on given row.
     """
 
-    sig_redirect_stdio_requested = Signal(bool)
-    """
-    This signal is emitted to request the main application to redirect
-    standard output/error when using Open/Save/Browse dialogs within widgets.
-
-    Parameters
-    ----------
-    redirect: bool
-        Start redirect (True) or stop redirect (False).
-    """
-
     sig_started = Signal()
     """This signal is emitted to inform the profiling process has started."""
 
@@ -172,7 +164,7 @@ class ProfilerWidget(PluginMainWidget):
         # Attributes
         self._last_wdir = None
         self._last_args = None
-        self._last_pythonpath = None
+        self.pythonpath = None
         self.error_output = None
         self.output = None
         self.running = False
@@ -214,7 +206,7 @@ class ProfilerWidget(PluginMainWidget):
         browse_action = self.create_action(
             ProfilerWidgetActions.Browse,
             text='',
-            tip=_('Select Python script'),
+            tip=_('Select Python file'),
             icon=self.create_icon('fileopen'),
             triggered=lambda x: self.select_file(),
         )
@@ -261,6 +253,7 @@ class ProfilerWidget(PluginMainWidget):
             triggered=self.clear,
         )
         self.clear_action.setEnabled(False)
+        self.save_action.setEnabled(False)
 
         # Main Toolbar
         toolbar = self.get_main_toolbar()
@@ -308,6 +301,8 @@ class ProfilerWidget(PluginMainWidget):
             icon = self.create_icon('run')
         self.start_action.setIcon(icon)
 
+        self.load_action.setEnabled(not self.running)
+        self.clear_action.setEnabled(not self.running)
         self.start_action.setEnabled(bool(self.filecombo.currentText()))
 
     # --- Private API
@@ -337,6 +332,7 @@ class ProfilerWidget(PluginMainWidget):
         self.output = self.error_output + self.output
         self.datelabel.setText('')
         self.show_data(justanalyzed=True)
+        self.save_action.setEnabled(True)
         self.update_actions()
 
     def _read_output(self, error=False):
@@ -366,17 +362,26 @@ class ProfilerWidget(PluginMainWidget):
         else:
             self.output += text
 
+    @on_conf_change(section='pythonpath_manager', option='spyder_pythonpath')
+    def _update_pythonpath(self, value):
+        self.pythonpath = value
+
     # --- Public API
     # ------------------------------------------------------------------------
     def save_data(self):
         """Save data."""
-        title = _( "Save profiler result")
+        title = _("Save profiler result")
         filename, _selfilter = getsavefilename(
             self,
             title,
             getcwd_or_home(),
             _("Profiler result") + " (*.Result)",
         )
+        extension = osp.splitext(filename)[1].lower()
+        if not extension:
+            # Needed to prevent trying to save a data file without extension
+            # See spyder-ide/spyder#19633
+            filename = filename + '.Result'
 
         if filename:
             self.datatree.save_data(filename)
@@ -393,6 +398,7 @@ class ProfilerWidget(PluginMainWidget):
         if filename:
             self.datatree.compare(filename)
             self.show_data()
+            self.save_action.setEnabled(True)
             self.clear_action.setEnabled(True)
 
     def clear(self):
@@ -402,7 +408,7 @@ class ProfilerWidget(PluginMainWidget):
         self.show_data()
         self.clear_action.setEnabled(False)
 
-    def analyze(self, filename, wdir=None, args=None, pythonpath=None):
+    def analyze(self, filename, wdir=None, args=None):
         """
         Start the profiling process.
 
@@ -412,8 +418,6 @@ class ProfilerWidget(PluginMainWidget):
             Working directory path string. Default is None.
         args: list
             Arguments to pass to the profiling process. Default is None.
-        pythonpath: str
-            Python path string. Default is None.
         """
         if not is_profiler_installed():
             return
@@ -436,7 +440,7 @@ class ProfilerWidget(PluginMainWidget):
             if wdir is None:
                 wdir = osp.dirname(filename)
 
-            self.start(wdir, args, pythonpath)
+            self.start(wdir, args)
 
     def select_file(self, filename=None):
         """
@@ -455,9 +459,9 @@ class ProfilerWidget(PluginMainWidget):
             self.sig_redirect_stdio_requested.emit(False)
             filename, _selfilter = getopenfilename(
                 self,
-                _("Select Python script"),
+                _("Select Python file"),
                 getcwd_or_home(),
-                _("Python scripts") + " (*.py ; *.pyw)"
+                _("Python files") + " (*.py ; *.pyw)"
             )
             self.sig_redirect_stdio_requested.emit(True)
 
@@ -488,7 +492,7 @@ class ProfilerWidget(PluginMainWidget):
             output_dialog.resize(700, 500)
             output_dialog.exec_()
 
-    def start(self, wdir=None, args=None, pythonpath=None):
+    def start(self, wdir=None, args=None):
         """
         Start the profiling process.
 
@@ -498,8 +502,6 @@ class ProfilerWidget(PluginMainWidget):
             Working directory path string. Default is None.
         args: list
             Arguments to pass to the profiling process. Default is None.
-        pythonpath: str
-            Python path string. Default is None.
         """
         filename = to_text_string(self.filecombo.currentText())
         if wdir is None:
@@ -512,12 +514,8 @@ class ProfilerWidget(PluginMainWidget):
             if args is None:
                 args = []
 
-        if pythonpath is None:
-            pythonpath = self._last_pythonpath
-
         self._last_wdir = wdir
         self._last_args = args
-        self._last_pythonpath = pythonpath
 
         self.datelabel.setText(_('Profiling, please wait...'))
 
@@ -531,17 +529,23 @@ class ProfilerWidget(PluginMainWidget):
             lambda ec, es=QProcess.ExitStatus: self._finished(ec, es))
         self.process.finished.connect(self.stop_spinner)
 
-        if pythonpath is not None:
-            env = [to_text_string(_pth)
-                   for _pth in self.process.systemEnvironment()]
-            add_pathlist_to_PYTHONPATH(env, pythonpath)
-            processEnvironment = QProcessEnvironment()
-            for envItem in env:
-                envName, __, envValue = envItem.partition('=')
-                processEnvironment.insert(envName, envValue)
+        # Start with system environment
+        proc_env = QProcessEnvironment()
+        for k, v in os.environ.items():
+            proc_env.insert(k, v)
+        proc_env.insert("PYTHONIOENCODING", "utf8")
+        proc_env.remove('PYTHONPATH')
+        if self.pythonpath is not None:
+            logger.debug(f"Pass Pythonpath {self.pythonpath} to process")
+            proc_env.insert('PYTHONPATH', os.pathsep.join(self.pythonpath))
+        self.process.setProcessEnvironment(proc_env)
 
-            processEnvironment.insert("PYTHONIOENCODING", "utf8")
-            self.process.setProcessEnvironment(processEnvironment)
+        executable = self.get_conf('executable', section='main_interpreter')
+
+        if not running_in_mac_app(executable):
+            env = self.process.processEnvironment()
+            env.remove('PYTHONHOME')
+            self.process.setProcessEnvironment(env)
 
         self.output = ''
         self.error_output = ''
@@ -559,11 +563,6 @@ class ProfilerWidget(PluginMainWidget):
 
         if args:
             p_args.extend(shell_split(args))
-
-        executable = sys.executable
-        if executable.endswith("spyder.exe"):
-            # py2exe distribution
-            executable = "python.exe"
 
         self.process.start(executable, p_args)
         running = self.process.waitForStarted()
@@ -622,7 +621,7 @@ class ProfilerWidget(PluginMainWidget):
         self.datelabel.setText(date_text)
 
 
-class TreeWidgetItem( QTreeWidgetItem ):
+class TreeWidgetItem(QTreeWidgetItem):
     def __init__(self, parent=None):
         QTreeWidgetItem.__init__(self, parent)
 
@@ -635,7 +634,7 @@ class TreeWidgetItem( QTreeWidgetItem ):
                 if t0 is not None and t1 is not None:
                     return t0 > t1
 
-            return float( self.text(column) ) > float( otherItem.text(column) )
+            return float(self.text(column)) > float(otherItem.text(column))
         except ValueError:
             return self.text(column) > otherItem.text(column)
 
@@ -682,6 +681,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
         }
         self.profdata = None   # To be filled by self.load_data()
         self.stats = None      # To be filled by self.load_data()
+        self.stats1 = []       # To be filled by self.load_data()
         self.item_depth = None
         self.item_list = None
         self.items_to_be_shown = None
@@ -737,17 +737,18 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
         self.stats1 = stats_indi
         self.stats = stats_indi[0].stats
 
-    def compare(self,filename):
+    def compare(self, filename):
         self.hide_diff_cols(False)
         self.compare_file = filename
 
     def hide_diff_cols(self, hide):
-        for i in (2,4,6):
+        for i in (2, 4, 6):
             self.setColumnHidden(i, hide)
 
     def save_data(self, filename):
         """Save profiler data."""
-        self.stats1[0].dump_stats(filename)
+        if len(self.stats1) > 0:
+            self.stats1[0].dump_stats(filename)
 
     def find_root(self):
         """Find a function without a caller"""
@@ -771,7 +772,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
 
     def show_tree(self):
         """Populate the tree with profiler data and display it."""
-        self.initialize_view() # Clear before re-populating
+        self.initialize_view()  # Clear before re-populating
         self.setItemsExpandable(True)
         self.setSortingEnabled(False)
         rootkey = self.find_root()  # This root contains profiler overhead
@@ -779,7 +780,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
             self.populate_tree(self, self.find_callees(rootkey))
             self.resizeColumnToContents(0)
             self.setSortingEnabled(True)
-            self.sortItems(1, Qt.AscendingOrder) # FIXME: hardcoded index
+            self.sortItems(1, Qt.AscendingOrder)  # FIXME: hardcoded index
             self.change_view(1)
 
     def function_info(self, functionKey):
@@ -873,14 +874,17 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
         return (map(self.color_string, islice(zip(*data), 1, 4)))
 
     def populate_tree(self, parentItem, children_list):
-        """Recursive method to create each item (and associated data) in the tree."""
+        """
+        Recursive method to create each item (and associated data)
+        in the tree.
+        """
         for child_key in children_list:
             self.item_depth += 1
             (filename, line_number, function_name, file_and_line, node_type
              ) = self.function_info(child_key)
 
-            ((total_calls, total_calls_dif), (loc_time, loc_time_dif), (cum_time,
-             cum_time_dif)) = self.format_output(child_key)
+            ((total_calls, total_calls_dif), (loc_time, loc_time_dif),
+             (cum_time, cum_time_dif)) = self.format_output(child_key)
 
             child_item = TreeWidgetItem(parentItem)
             self.item_list.append(child_item)
@@ -891,7 +895,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
             child_item.setData(0, Qt.DisplayRole, function_name)
             child_item.setIcon(0, self.icon_list[node_type])
 
-            child_item.setToolTip(1, _('Time in function '\
+            child_item.setToolTip(1, _('Time in function '
                                        '(including sub-functions)'))
             child_item.setData(1, Qt.DisplayRole, cum_time)
             child_item.setTextAlignment(1, Qt.AlignRight)
@@ -900,8 +904,8 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
             child_item.setForeground(2, QColor(cum_time_dif[1]))
             child_item.setTextAlignment(2, Qt.AlignLeft)
 
-            child_item.setToolTip(3, _('Local time in function '\
-                                      '(not in sub-functions)'))
+            child_item.setToolTip(3, _('Local time in function '
+                                       '(not in sub-functions)'))
 
             child_item.setData(3, Qt.DisplayRole, loc_time)
             child_item.setTextAlignment(3, Qt.AlignRight)
@@ -910,7 +914,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
             child_item.setForeground(4, QColor(loc_time_dif[1]))
             child_item.setTextAlignment(4, Qt.AlignLeft)
 
-            child_item.setToolTip(5, _('Total number of calls '\
+            child_item.setToolTip(5, _('Total number of calls '
                                        '(including recursion)'))
 
             child_item.setData(5, Qt.DisplayRole, total_calls)
@@ -920,7 +924,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
             child_item.setForeground(6, QColor(total_calls_dif[1]))
             child_item.setTextAlignment(6, Qt.AlignLeft)
 
-            child_item.setToolTip(7, _('File:line '\
+            child_item.setToolTip(7, _('File:line '
                                        'where function is defined'))
             child_item.setData(7, Qt.DisplayRole, file_and_line)
             #child_item.setExpanded(True)
@@ -961,11 +965,13 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
 
     def get_top_level_items(self):
         """Iterate over top level items"""
-        return [self.topLevelItem(_i) for _i in range(self.topLevelItemCount())]
+        return [self.topLevelItem(_i)
+                for _i in range(self.topLevelItemCount())]
 
     def get_items(self, maxlevel):
         """Return all items with a level <= `maxlevel`"""
         itemlist = []
+
         def add_to_itemlist(item, maxlevel, level=1):
             level += 1
             for index in range(item.childCount()):
@@ -973,6 +979,7 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
                 itemlist.append(citem)
                 if level <= maxlevel:
                     add_to_itemlist(citem, maxlevel, level)
+
         for tlitem in self.get_top_level_items():
             itemlist.append(tlitem)
             if maxlevel > 0:
@@ -980,13 +987,13 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
         return itemlist
 
     def change_view(self, change_in_depth):
-        """Change the view depth by expand or collapsing all same-level nodes"""
+        """Change view depth by expanding or collapsing all same-level nodes"""
         self.current_view_depth += change_in_depth
         if self.current_view_depth < 0:
             self.current_view_depth = 0
         self.collapseAll()
         if self.current_view_depth > 0:
-            for item in self.get_items(maxlevel=self.current_view_depth-1):
+            for item in self.get_items(maxlevel=self.current_view_depth - 1):
                 item.setExpanded(True)
 
 
@@ -998,25 +1005,25 @@ def primes(n):
     Simple test function
     Taken from http://www.huyng.com/posts/python-performance-analysis/
     """
-    if n==2:
+    if n == 2:
         return [2]
-    elif n<2:
+    elif n < 2:
         return []
-    s=list(range(3,n+1,2))
+    s = list(range(3, n + 1, 2))
     mroot = n ** 0.5
-    half=(n+1)//2-1
-    i=0
-    m=3
+    half = (n + 1) // 2 - 1
+    i = 0
+    m = 3
     while m <= mroot:
         if s[i]:
-            j=(m*m-3)//2
-            s[j]=0
-            while j<half:
-                s[j]=0
-                j+=m
-        i=i+1
-        m=2*i+3
-    return [2]+[x for x in s if x]
+            j = (m * m - 3) // 2
+            s[j] = 0
+            while j < half:
+                s[j] = 0
+                j += m
+        i = i + 1
+        m = 2 * i + 3
+    return [2] + [x for x in s if x]
 
 
 def test():
@@ -1040,6 +1047,8 @@ def test():
     widget = ProfilerWidget('test', plugin=plugin_mock)
     widget._setup()
     widget.setup()
+    widget.get_conf('executable', get_python_executable(),
+                    section='main_interpreter')
     widget.resize(800, 600)
     widget.show()
     widget.analyze(script)

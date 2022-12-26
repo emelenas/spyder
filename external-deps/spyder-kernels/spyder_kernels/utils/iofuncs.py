@@ -23,15 +23,14 @@ import tarfile
 import tempfile
 import shutil
 import types
-import warnings
 import json
 import inspect
 import dis
 import copy
 import glob
+import pickle
 
 # Local imports
-from spyder_kernels.py3compat import getcwd, pickle, PY2, to_text_string
 from spyder_kernels.utils.lazymodules import (
     FakeObject, numpy as np, pandas as pd, PIL, scipy as sp)
 
@@ -83,7 +82,6 @@ class MatlabStruct(dict):
                    dis.opmap.get('STOP_CODE', 0)]
         bytecode = frame.f_code.co_code
         instruction = bytecode[frame.f_lasti + 3]
-        instruction = ord(instruction) if PY2 else instruction
         return instruction in allowed
 
     __setattr__ = dict.__setitem__
@@ -254,11 +252,7 @@ def load_pickle(filename):
 def load_json(filename):
     """Load a json file as a dictionary"""
     try:
-        if PY2:
-            args = 'rb'
-        else:
-            args = 'r'
-        with open(filename, args) as fid:
+        with open(filename, 'r') as fid:
             data = json.load(fid)
         return data, None
     except Exception as err:
@@ -268,7 +262,7 @@ def load_json(filename):
 def save_dictionary(data, filename):
     """Save dictionary in a single file .spydata file"""
     filename = osp.abspath(filename)
-    old_cwd = getcwd()
+    old_cwd = os.getcwd()
     os.chdir(osp.dirname(filename))
     error_message = None
     skipped_keys = []
@@ -359,7 +353,7 @@ def save_dictionary(data, filename):
                 tar.add(osp.basename(fname))
                 os.remove(fname)
     except (RuntimeError, pickle.PicklingError, TypeError) as error:
-        error_message = to_text_string(error)
+        error_message = str(error)
     else:
         if skipped_keys:
             skipped_keys.sort()
@@ -370,19 +364,39 @@ def save_dictionary(data, filename):
     return error_message
 
 
+def is_within_directory(directory, target):
+    """Check if a file is within a directory."""
+    abs_directory = os.path.abspath(directory)
+    abs_target = os.path.abspath(target)
+    prefix = os.path.commonprefix([abs_directory, abs_target])
+    return prefix == abs_directory
+
+
+def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+    """Safely extract a tar file."""
+    for member in tar.getmembers():
+        member_path = os.path.join(path, member.name)
+        if not is_within_directory(path, member_path):
+            raise Exception(
+                f"Attempted path traversal in tar file {tar.name!r}"
+            )
+    tar.extractall(path, members, numeric_owner=numeric_owner)
+
+
 def load_dictionary(filename):
     """Load dictionary from .spydata file"""
     filename = osp.abspath(filename)
-    old_cwd = getcwd()
+    old_cwd = os.getcwd()
     tmp_folder = tempfile.mkdtemp()
     os.chdir(tmp_folder)
     data = None
     error_message = None
     try:
         with tarfile.open(filename, "r") as tar:
-            tar.extractall()
+            safe_extract(tar)
+
         pickle_filename = glob.glob('*.pickle')[0]
-        # 'New' format (Spyder >=2.2 for Python 2 and Python 3)
+        # 'New' format (Spyder >=2.2)
         with open(pickle_filename, 'rb') as fdesc:
             data = pickle.loads(fdesc.read())
         saved_arrays = {}
@@ -402,18 +416,18 @@ def load_dictionary(filename):
                 pass
     # Except AttributeError from e.g. trying to load function no longer present
     except (AttributeError, EOFError, ValueError) as error:
-        error_message = to_text_string(error)
+        error_message = str(error)
     # To ensure working dir gets changed back and temp dir wiped no matter what
     finally:
         os.chdir(old_cwd)
         try:
             shutil.rmtree(tmp_folder)
         except OSError as error:
-            error_message = to_text_string(error)
+            error_message = str(error)
     return data, error_message
 
 
-class IOFunctions(object):
+class IOFunctions:
     def __init__(self):
         self.load_extensions = None
         self.save_extensions = None
@@ -432,7 +446,7 @@ class IOFunctions(object):
         save_filters = []
         load_ext = []
         for ext, name, loadfunc, savefunc in iofuncs:
-            filter_str = to_text_string(name + " (*%s)" % ext)
+            filter_str = str(name + " (*%s)" % ext)
             if loadfunc is not None:
                 load_filters.append(filter_str)
                 load_extensions[filter_str] = ext
@@ -442,9 +456,9 @@ class IOFunctions(object):
                 save_extensions[filter_str] = ext
                 save_filters.append(filter_str)
                 save_funcs[ext] = savefunc
-        load_filters.insert(0, to_text_string("Supported files"+" (*"+\
-                                              " *".join(load_ext)+")"))
-        load_filters.append(to_text_string("All files (*.*)"))
+        load_filters.insert(
+            0, str("Supported files" + " (*" + " *".join(load_ext) + ")"))
+        load_filters.append(str("All files (*.*)"))
         self.load_filters = "\n".join(load_filters)
         self.save_filters = "\n".join(save_filters)
         self.load_funcs = load_funcs

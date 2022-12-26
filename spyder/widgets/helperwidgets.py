@@ -12,19 +12,23 @@ Helper widgets.
 import re
 
 # Third party imports
+import qstylizer.style
 from qtpy import PYQT5
-from qtpy.QtCore import QPoint, QRegExp, QSize, QSortFilterProxyModel, Qt
-from qtpy.QtGui import (QAbstractTextDocumentLayout, QPainter,
-                        QRegExpValidator, QTextDocument)
+from qtpy.QtCore import (
+    QPoint, QRegExp, QSize, QSortFilterProxyModel, Qt, Signal)
+from qtpy.QtGui import (QAbstractTextDocumentLayout, QColor, QFontMetrics,
+                        QPainter, QRegExpValidator, QTextDocument, )
 from qtpy.QtWidgets import (QApplication, QCheckBox, QLineEdit, QMessageBox,
                             QSpacerItem, QStyle, QStyledItemDelegate,
-                            QStyleOptionViewItem, QToolButton, QToolTip,
-                            QVBoxLayout)
+                            QStyleOptionFrame, QStyleOptionViewItem,
+                            QToolButton, QToolTip, QVBoxLayout,
+                            QWidget, QHBoxLayout)
 
 # Local imports
 from spyder.config.base import _
 from spyder.utils.icon_manager import ima
 from spyder.utils.stringmatching import get_search_regex
+from spyder.utils.palette import QStylePalette
 
 # Valid finder chars. To be improved
 VALID_ACCENT_CHARS = "ÁÉÍOÚáéíúóàèìòùÀÈÌÒÙâêîôûÂÊÎÔÛäëïöüÄËÏÖÜñÑ"
@@ -215,43 +219,42 @@ class ItemDelegate(QStyledItemDelegate):
 
 
 class IconLineEdit(QLineEdit):
-    """Custom QLineEdit that includes an icon representing the validation."""
+    """
+    Custom QLineEdit that includes an icon representing a validation for its
+    text and can also elide it.
+    """
 
-    def __init__(self, *args, **kwargs):
-        super(IconLineEdit, self).__init__(*args, **kwargs)
+    def __init__(self, parent, elide_text=False, ellipsis_place=Qt.ElideLeft):
+        super().__init__(parent)
 
+        self.elide_text = elide_text
+        self.ellipsis_place = ellipsis_place
         self._status = True
         self._status_set = True
+        self._focus_in = False
         self._valid_icon = ima.icon('todo')
         self._invalid_icon = ima.icon('warning')
         self._set_icon = ima.icon('todo_list')
-        self._application_style = QApplication.style().objectName()
         self._refresh()
         self._paint_count = 0
         self._icon_visible = False
 
     def _refresh(self):
-        """After an application style change, the paintEvent updates the
-        custom defined stylesheet.
+        """
+        This makes space for the right validation icons after focus is given to
+        the widget.
         """
         padding = self.height()
-        css_base = """QLineEdit {{
-                                 border: none;
-                                 padding-right: {padding}px;
-                                 }}
-                   """
-        css_oxygen = """QLineEdit {{background: transparent;
-                                   border: none;
-                                   padding-right: {padding}px;
-                                   }}
-                     """
-        if self._application_style == 'oxygen':
-            css_template = css_oxygen
-        else:
-            css_template = css_base
+        if self.elide_text and not self._focus_in:
+            padding = 0
 
-        css = css_template.format(padding=padding)
-        self.setStyleSheet(css)
+        css = qstylizer.style.StyleSheet()
+        css.QLineEdit.setValues(
+            border='none',
+            paddingRight=f"{padding}px"
+        )
+
+        self.setStyleSheet(css.toString())
         self.update()
 
     def hide_status_icon(self):
@@ -274,13 +277,33 @@ class IconLineEdit(QLineEdit):
         self.update()
 
     def paintEvent(self, event):
-        """Qt Override.
-
-        Include a validation icon to the left of the line edit.
         """
-        super(IconLineEdit, self).paintEvent(event)
-        painter = QPainter(self)
+        Include a validation icon to the left of the line edit and elide text
+        if requested.
+        """
+        # Elide text if requested.
+        # See PR spyder-ide/spyder#20005 for context.
+        if self.elide_text and not self._focus_in:
+            # This code is taken for the most part from the
+            # AmountEdit.paintEvent method, part of the Electrum project. See
+            # the Electrum entry in our NOTICE.txt file for the details.
+            # Licensed under the MIT license.
+            painter = QPainter(self)
+            option = QStyleOptionFrame()
+            self.initStyleOption(option)
+            text_rect = self.style().subElementRect(
+                QStyle.SE_LineEditContents, option, self)
+            text_rect.adjust(0, 0, -2, 0)
+            fm = QFontMetrics(self.font())
+            text = fm.elidedText(self.text(), self.ellipsis_place,
+                                 text_rect.width())
+            painter.setPen(QColor(QStylePalette.COLOR_TEXT_1))
+            painter.drawText(text_rect, int(Qt.AlignLeft | Qt.AlignVCenter),
+                             text)
+            return
 
+        super().paintEvent(event)
+        painter = QPainter(self)
         rect = self.geometry()
         space = int((rect.height())/6)
         h = rect.height() - space
@@ -294,61 +317,98 @@ class IconLineEdit(QLineEdit):
             else:
                 pixmap = self._invalid_icon.pixmap(h, h)
 
-            painter.drawPixmap(w, space, pixmap)
-
-        application_style = QApplication.style().objectName()
-        if self._application_style != application_style:
-            self._application_style = application_style
-            self._refresh()
+            painter.drawPixmap(w, 2, pixmap)
 
         # Small hack to guarantee correct padding on Spyder start
         if self._paint_count < 5:
             self._paint_count += 1
             self._refresh()
 
+    def focusInEvent(self, event):
+        """Reimplemented to know when this widget has received focus."""
+        self._focus_in = True
+        self._refresh()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        """Reimplemented to know when this widget has lost focus."""
+        self._focus_in = False
+        self._refresh()
+        super().focusOutEvent(event)
+
 
 class FinderLineEdit(QLineEdit):
-    """QLineEdit for filtering listed elements in the parent widget."""
+    sig_hide_requested = Signal()
+    sig_find_requested = Signal()
 
-    def __init__(self, parent, callback=None, main=None,
-                 regex_base=VALID_FINDER_CHARS):
+    def __init__(self, parent, regex_base=None, key_filter_dict=None):
         super(FinderLineEdit, self).__init__(parent)
-        self._parent = parent
-        self.main = main
+        self.key_filter_dict = key_filter_dict
 
-        # Widget setup
-        regex = QRegExp(regex_base + "{100}")
-        self.setValidator(QRegExpValidator(regex))
-
-        # Signals
-        if callback:
-            self.textChanged.connect(callback)
-
-    def set_text(self, text):
-        """Set the filter text."""
-        text = text.strip()
-        new_text = self.text() + text
-        self.setText(new_text)
+        if regex_base is not None:
+            # Widget setup
+            regex = QRegExp(regex_base + "{100}")
+            self.setValidator(QRegExpValidator(regex))
 
     def keyPressEvent(self, event):
-        """
-        Qt Override.
-
-        The parent needs to implement the methods to handle focus on the
-        next/previous row and a action over the selected element.
-
-        This should be override.
-        """
+        """Qt and FilterLineEdit Override."""
         key = event.key()
-        if key in [Qt.Key_Up]:
-            self._parent.previous_row()
-        elif key in [Qt.Key_Down]:
-            self._parent.next_row()
+        if self.key_filter_dict is not None and key in self.key_filter_dict:
+            self.key_filter_dict[key]()
+        elif key in [Qt.Key_Escape]:
+            self.sig_hide_requested.emit()
         elif key in [Qt.Key_Enter, Qt.Key_Return]:
-            self._parent.selected_element()
+            self.sig_find_requested.emit()
         else:
             super(FinderLineEdit, self).keyPressEvent(event)
 
+
+class FinderWidget(QWidget):
+    sig_find_text = Signal(str)
+    sig_hide_finder_requested = Signal()
+
+    def __init__(self, parent, regex_base=None, key_filter_dict=None,
+                 find_on_change=False):
+        super().__init__(parent)
+        # Parent is assumed to be a spyder widget
+        self.text_finder = FinderLineEdit(
+            self,
+            regex_base=regex_base,
+            key_filter_dict=key_filter_dict
+        )
+        self.text_finder.sig_find_requested.connect(self.do_find)
+        if find_on_change:
+            self.text_finder.textChanged.connect(self.do_find)
+        self.text_finder.sig_hide_requested.connect(
+            self.sig_hide_finder_requested)
+
+        self.finder_close_button = QToolButton(self)
+        self.finder_close_button.setIcon(ima.icon('DialogCloseButton'))
+        self.finder_close_button.clicked.connect(
+            self.sig_hide_finder_requested)
+
+        finder_layout = QHBoxLayout()
+        finder_layout.addWidget(self.finder_close_button)
+        finder_layout.addWidget(self.text_finder)
+        finder_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(finder_layout)
+        self.setVisible(False)
+
+    def do_find(self):
+        """Send text."""
+        text = self.text_finder.text()
+        if not text:
+            text = ''
+        self.sig_find_text.emit(text)
+
+    def set_visible(self, visible):
+        """Set visibility of widget."""
+        self.setVisible(visible)
+        if visible:
+            self.text_finder.setFocus()
+            self.do_find()
+        else:
+            self.sig_find_text.emit("")
 
 class CustomSortFilterProxy(QSortFilterProxyModel):
     """Custom column filter based on regex."""

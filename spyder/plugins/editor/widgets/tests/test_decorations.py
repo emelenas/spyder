@@ -54,7 +54,8 @@ def test_decorations(codeeditor, qtbot):
 
     # Assert number of decorations is the one we expect.
     qtbot.wait(3000)
-    decorations = editor.decorations._decorations
+    decorations = editor.decorations._sorted_decorations()
+
     assert len(decorations) == 2 + text.count('some_variable')
 
     # Assert that selection 0 is current cell
@@ -78,7 +79,7 @@ def test_decorations(codeeditor, qtbot):
     # Clear decorations to be sure they are painted again below.
     editor.decorations.clear()
     editor.decorations._update()
-    assert editor.decorations._decorations == []
+    assert editor.decorations._sorted_decorations() == []
 
     # Move to a random place in the file and wait until decorations are
     # updated.
@@ -87,7 +88,7 @@ def test_decorations(codeeditor, qtbot):
     qtbot.wait(editor.UPDATE_DECORATIONS_TIMEOUT + 100)
 
     # Assert a new cell is painted
-    decorations = editor.decorations._decorations
+    decorations = editor.decorations._sorted_decorations()
     assert decorations[0].kind == 'current_cell'
 
 
@@ -121,7 +122,7 @@ def test_update_decorations_when_scrolling(qtbot):
         # be a call to _update.
         assert _update.call_count == 0
 
-        with open(osp.join(PARENT, 'codeeditor.py'), 'r') as f:
+        with open(osp.join(PARENT, 'codeeditor.py'), 'r', encoding='utf-8') as f:
             text = f.read()
         editor.set_text(text)
 

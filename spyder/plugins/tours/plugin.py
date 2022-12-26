@@ -64,6 +64,7 @@ class Tours(SpyderPluginV2):
             self.get_container().tour_action,
             menu_id=ApplicationMenus.Help,
             section=HelpMenuSections.Documentation,
+            before_section=HelpMenuSections.Support,
             before=ApplicationActions.SpyderDocumentationAction)
 
     @on_plugin_teardown(plugin=Plugins.MainMenu)
@@ -102,7 +103,6 @@ class Tours(SpyderPluginV2):
         index: int
             The tour index to display.
         """
-        self.main.maximize_dockwidget(restore=True)
         self.get_container().show_tour(index)
 
     def show_tour_message(self, force=False):

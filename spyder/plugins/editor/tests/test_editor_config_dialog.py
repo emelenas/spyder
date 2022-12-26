@@ -25,14 +25,11 @@ class MainWindowMock(QMainWindow):
     edit_toolbar_actions = []
     run_menu_actions = []
     run_toolbar_actions = []
-    debug_menu_actions = []
-    debug_toolbar_actions = []
     source_menu_actions = []
     source_toolbar_actions = []
     search_menu_actions = []
     statusbar = Mock()
     all_actions_defined = Mock()
-    sig_pythonpath_changed = Mock()
     new_instance = Mock()
     plugin_focus_changed = Mock()
     fallback_completions = Mock()
